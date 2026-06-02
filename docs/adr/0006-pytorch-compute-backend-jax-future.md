@@ -8,6 +8,19 @@ Accepted. **Amends** ADR-0001, ADR-0003, ADR-0004 (retargets their
 TensorFlow/Keras/TFP-specific claims to PyTorch; their statistical decisions are
 unchanged — see *Relationship to other ADRs*).
 
+> **Amendment (2026-06-03): reuse → reimplement.** This ADR's *Scope* section
+> originally said neural-bamlss "reuses NAMpy's TF-free Python directly — the
+> formula parser (`nampy/formulas/`) and the `ShapeFunctionRegistry` pattern …
+> imported or adapted as-is." That is **superseded**: neural-bamlss now treats the
+> **entire `NAMpy/` tree as reference-only** and **reimplements the formula parser
+> and `ShapeFunctionRegistry` from scratch** in its own `src/neural_bamlss/`
+> namespace. NAMpy is read to see how things were done before, but **no NAMpy code
+> is imported, vendored, or ported.** Rationale: a single clean PyTorch namespace
+> with no cross-package coupling, at the modest cost of reimplementing the parser.
+> Consequence: issue slices that referenced reuse (notably 0013, which cites
+> `nampy/formulas/formulas.py:223`) describe the *target behavior* of the
+> reimplemented parser, not a reused module. See `CLAUDE.md` for the process rules.
+
 ## Context
 
 neural-bamlss is being built by Bayesian-ifying NAMpy, which today runs on
