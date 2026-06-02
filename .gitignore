@@ -223,3 +223,6 @@ __marimo__/
 
 # Upstream NAMpy clone kept locally as a baseline, not tracked here
 NAMpy/
+
+# Local Claude Code working rules — not tracked
+CLAUDE.md
