@@ -2,6 +2,19 @@
 
 Status: Draft · Date: 2026-06-03
 
+> **Backend superseded (ADR-0006, 2026-06-03).** This PRD was written against the
+> TensorFlow / Keras 2 / TFP stack. The package now targets **PyTorch**, with
+> **JAX/NumPyro** as the numerical-future + MCMC backend. The TFP/Keras-specific
+> acceptance criteria below still describe the intended *behaviour*, but their API
+> nouns translate: `add_loss` auto-propagation → explicit KL collected by a
+> module-walk and added in the training step; `tfd.MixtureSameFamily` →
+> `torch.distributions.MixtureSameFamily`; `tf.keras.Model` → `nn.Module`;
+> `.keras`/SavedModel/H5 save-load → `state_dict` + config dict (the H5
+> weight-name-collision caveat no longer applies). The "spike-verified on TF
+> 2.15.1 / Keras 2.15 / TFP 0.23" claims are historical and owed a re-verification
+> on PyTorch. See ADR-0006 for the full mapping; do not treat the TF API names here
+> as binding.
+
 ## Problem Statement
 
 I fit interpretable distributional additive models (NAMLSS — Neural Additive Models for Location, Scale and Shape) with NAMpy. They give me per-feature effect curves on every parameter of the response distribution, but every effect is a single point estimate. On the small datasets I actually care about, I cannot tell which effects are well-determined and which are guesses, the models overfit without a principled regularizer, and when I have a handful of candidate formulas I have no defensible way to choose between them. NAMpy's deterministic feature networks give me no epistemic uncertainty, no principled prior-based regularization, and no Bayesian model-comparison criterion.

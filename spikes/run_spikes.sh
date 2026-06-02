@@ -7,7 +7,7 @@ rc=0
 echo "=== layer smoke check ==="
 python variational_dense.py || rc=1
 echo
-echo "=== spike 1: KL / add_loss propagation ==="
+echo "=== spike 1: KL module-walk propagation ==="
 python spike_kl_propagation.py || rc=1
 echo
 echo "=== spike 2: serialization round-trip ==="

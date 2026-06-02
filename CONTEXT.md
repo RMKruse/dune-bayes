@@ -2,10 +2,22 @@
 
 The neural analog of the **BAMLSS** R package (Bayesian Additive Models for
 Location, Scale and Shape). It is being built by taking the `NAMpy` package
-(deterministic interpretable additive distributional-regression models, on
-TensorFlow / Keras / TensorFlow-Probability) and replacing the deterministic
-feature networks with **Bayesian** feature networks, so that each feature's
-effect on each distributional parameter carries epistemic uncertainty.
+(deterministic interpretable additive distributional-regression models) and
+replacing the deterministic feature networks with **Bayesian** feature networks,
+so that each feature's effect on each distributional parameter carries epistemic
+uncertainty.
+
+> **Compute backend (ADR-0006).** The package targets **PyTorch**. NAMpy was
+> written on TensorFlow / Keras 2 / TensorFlow-Probability (TFP); that stack is
+> **legacy** and is being ported. The binding dependency was TFP (distributions,
+> `DistributionLambda`, `MixtureSameFamily`), which is also the most stagnant part
+> of the old stack — hence the switch. **JAX is the designated numerical future:**
+> the deferred MCMC backend (ADR-0001) and performance work land on
+> **NumPyro/BlackJAX**, slotting in behind the same distribution/inference seam.
+> The statistical design below is backend-agnostic; where it names a TFP/Keras API
+> (`tfd.*`, `DistributionLambda`, `add_loss`, `.keras` save), read the PyTorch
+> equivalent (`torch.distributions.*`, a module returning a distribution, explicit
+> KL collection, `state_dict`). See ADR-0006 for the full mapping.
 
 ## Goals (in priority order)
 
@@ -19,10 +31,20 @@ effect on each distributional parameter carries epistemic uncertainty.
 
 ## Packaging
 
-**neural-bamlss is its own package**, reusing NAMpy's machinery by design
-(formula parser + `ShapeFunctionRegistry`, families, `DataModule`, plotting) with
-Bayesian shape functions added. The repo name reflects this new identity. The
-deterministic NAMpy shape functions are retained as baselines.
+**neural-bamlss is its own package**, reusing NAMpy's machinery by design — but the
+reuse splits by backend (ADR-0006). NAMpy stays on TF/Keras/TFP and is **not
+rewritten**:
+
+- **Reused directly** (TF-free Python): the **formula parser** and the
+  **`ShapeFunctionRegistry`** pattern carry no TF dependency.
+- **Reimplemented in PyTorch** (cannot cross the backend boundary): **families**
+  (`tfd.*` → `torch.distributions.*`), the **`DataModule`** (`tf.data` →
+  `torch.utils.data` + numpy/sklearn preprocessing), **shape functions** (Keras →
+  `nn.Module`), and **plotting** as needed.
+
+The repo name reflects this new identity. The deterministic NAMpy shape functions
+are retained as baselines (reached as the external TF package for comparison, not
+ported into the PyTorch tree).
 
 ## Model class & training UX
 
@@ -71,17 +93,20 @@ secondary, biased evidence proxy. No literal Bayes Factors (ADR-0001).
 - **ELBO** — evidence lower bound; the training objective = NLL + weight-KL/N.
   Doubles as a (biased) model-evidence proxy.
 - **`VariationalDense`** — the single in-house atom every Bayesian shape function
-  is built from: a thin Keras layer with a mean-field Normal weight posterior
-  (`loc` + softplus `scale`), a prior set by **serializable config** (a
-  `prior_scale` float or a hierarchical-scale handle, never a closure), KL emitted
-  via `add_loss`, and an internal flipout-style estimator flag for variance
-  reduction. Chosen over raw `tfp.layers.DenseVariational` / `DenseFlipout`
-  because only an owned layer gives flexible per-feature/hierarchical priors
-  (ADR-0002) **and** variance reduction **and** working Keras save/load
-  (closure-free `get_config`). Both the KL-via-`add_loss` and the save/load claims
-  are **spike-verified** on the target stack (TF 2.15.1 / Keras 2.15 / TFP 0.23);
-  supported save formats are **native `.keras` and SavedModel** (legacy H5 is not
-  supported — weight-name collision). See ADR-0004 and `spikes/`.
+  is built from: a thin **PyTorch `nn.Module`** with a mean-field Normal weight
+  posterior (`loc` + softplus `scale`), a prior set by **serializable config** (a
+  `prior_scale` float or a hierarchical-scale handle, never a closure), KL
+  collected explicitly by walking the module tree, and an internal flipout-style
+  estimator flag for variance reduction. Owning the atom (rather than a stock
+  library layer) is what gives flexible per-feature/hierarchical priors (ADR-0002)
+  **and** variance reduction **and** clean save/load (`state_dict` + config dict —
+  no weight-name-collision failure mode). On the legacy TF stack this layer was a
+  Keras `Layer` chosen over raw `tfp.layers.DenseVariational` / `DenseFlipout`, and
+  the KL-via-`add_loss` and `.keras`/SavedModel save/load claims were
+  spike-verified on TF 2.15.1 / Keras 2.15 / TFP 0.23; the spikes have since been
+  **ported to PyTorch and both claims re-verified green** (module-walk KL across the
+  NAMLSS graph; `state_dict` + config save/load with `max|Δw| = 0`; torch 2.12 /
+  Python 3.12). See ADR-0004, ADR-0006, and `spikes/`.
 - **`BayesianMLP`** — the flagship Bayesian shape function: **fully variational**
   (every `Dense` → `VariationalDense`), so uncertainty propagates through
   the function *shape*, not just a final rescaling. Serves goal 1 best; shape

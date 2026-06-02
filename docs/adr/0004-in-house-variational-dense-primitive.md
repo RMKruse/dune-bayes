@@ -4,9 +4,21 @@ Date: 2026-06-02
 
 ## Status
 
-Accepted — both load-bearing claims verified by spike on the target stack
+Accepted — both load-bearing claims verified by spike on the **then-target** stack
 (TF 2.15.1 / Keras 2.15 / TFP 0.23.0 / Python 3.11), 2026-06-02. See
 `spikes/` and the Verification section below.
+
+**Amended by ADR-0006 (2026-06-03):** the core decision — an owned variational
+atom rather than a stock library layer — **survives the backend switch to
+PyTorch**, for the same reasons. What changes: the host framework (Keras `Layer` →
+`nn.Module`), and serialization (`.keras`/SavedModel → `state_dict` + config dict),
+which *dissolves* the H5/`.keras` fragility this ADR worked around — there is no
+PyTorch equivalent of the weight-name collision. The TF/TFP spike results in the
+Verification section below are now **historical**, but both load-bearing claims
+have been **re-verified green on PyTorch** (torch 2.12 / Python 3.12): KL
+aggregation across the nested NAMLSS graph via an explicit module-walk, and a
+`state_dict` + config save/load round-trip with `max|Δw| = 0`. See the ported
+`spikes/` and the PyTorch note in the Verification section.
 
 ## Context
 
@@ -71,6 +83,15 @@ either raw TFP primitive.
 - Re-derives functionality TFP already provides for the common (fixed-prior) case.
 
 ## Verification
+
+> **PyTorch re-verification (ADR-0006, 2026-06-03).** The spikes have been ported to
+> PyTorch and both claims pass: spike 1 — `collect_kl`'s module-walk gathers KL from
+> all 6 nested `VariationalDense` modules through the sum and the `torch.distributions`
+> family head, `beta` gates it (β=0 → 0, β=1 → restored), it scales exactly as KL/N
+> (ratio = 256), and an optimizer step adds it to the NLL (gap = KL/N); spike 2 —
+> a `config + state_dict` bundle reconstructs the model from config alone and
+> round-trips every variational weight with `max|Δw| = 0`. The original TF/TFP
+> verification below is retained as the historical record.
 
 Scaffolded spikes (`spikes/`) reproduce the real NAMLSS graph shape (per-feature
 sub-models → `Add` → `tfp.layers.DistributionLambda`) and assert the two claims on

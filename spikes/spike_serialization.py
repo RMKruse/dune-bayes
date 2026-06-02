@@ -1,91 +1,112 @@
 """Spike 2 — does a VariationalDense model round-trip through save/load?
 
-ADR-0004 claims the in-house layer retires the save/load fragility that sinks raw
-`tfp.layers.DenseVariational` / `DenseFlipout` (their prior/posterior closures
-don't serialize). The claim rests on a closure-free `get_config` that stores only
-floats/strings, with the variational loc/scale saved as ordinary Keras weights.
+PyTorch port (ADR-0006). ADR-0004 claimed an in-house layer retires the save/load
+fragility that sinks raw `tfp.layers.DenseVariational` / `DenseFlipout` (their
+prior/posterior closures don't serialize). On TF the claim rested on a closure-free
+`get_config` plus the `.keras`/SavedModel format matrix (and legacy H5 *failing* on
+a weight-name collision). On PyTorch the claim is far cleaner and has no format
+matrix at all: a config dict (only ints/floats/strings — no closures) plus a
+`state_dict`, saved together with `torch.save` and reconstructed without re-supplying
+the architecture. There is no H5-style weight-name-collision failure mode to dodge.
 
-This script builds the same nested-sub-model + DistributionLambda model as spike 1
-and asserts, for each supported save format:
+This script builds the same nested-sub-module + family-head model as spike 1 and
+asserts:
 
-  [A] Layer-level get_config/from_config rebuilds the layer with identical prior
+  [A] Module-level get_config/from_config rebuilds the module with identical prior
       hyperparameters and no closures.
-  [B] A full model save -> load reconstructs without needing to re-supply the
-      architecture, only custom_objects.
+  [B] A full model save -> load reconstructs from the saved config alone (no
+      architecture re-supplied in code), then loads weights.
   [C] Every variational weight (loc/rho for kernel and bias) survives the
       round-trip elementwise, and the reloaded model runs a forward pass with the
       right output shape. (We compare *weights*, not stochastic predictions —
-      reparameterization noise is not reproducible across two distinct layer
-      objects, so a prediction match would be an unreliable test.)
-
-Formats tried: Keras V3 (`.keras`), legacy H5 (`.h5`), and SavedModel dir. Each is
-attempted independently; a format that the installed TF/TFP version cannot handle
-is reported as a SKIP with the error, not a hard failure — the point of the spike
-is to discover which format(s) work here.
+      reparameterization noise is not reproducible across two module objects, so a
+      prediction match would be an unreliable test.)
 
 Run:  python spike_serialization.py
-Exit code 0 = at least one format fully round-trips and config checks pass.
+Exit code 0 = the round-trip and config checks pass.
 """
 
 import os
 import sys
 import tempfile
 
-import numpy as np
-import tensorflow as tf
-import tensorflow_probability as tfp
+import torch
+import torch.nn as nn
 
-from variational_dense import VariationalDense, CUSTOM_OBJECTS, set_kl_beta
+from variational_dense import VariationalDense, set_kl_beta
 
-tfd = tfp.distributions
 PARAM_COUNT = 2
 N = 128
 
 
-def normal_from_params(t):
-    loc = t[..., 0]
-    scale = 1e-3 + tf.math.softplus(t[..., 1])
-    return tfd.Normal(loc=loc, scale=scale)
+class FeatureNet(nn.Module):
+    def __init__(self, prior_scale=0.7):
+        super().__init__()
+        self.h = VariationalDense(1, 8, prior_scale=prior_scale, kl_divisor=N, activation="relu")
+        self.out = VariationalDense(8, PARAM_COUNT, prior_scale=prior_scale, kl_divisor=N)
+
+    def forward(self, x):
+        return self.out(self.h(x))
 
 
-def make_feature_net(name, prior_scale=0.7):
-    inp = tf.keras.Input(shape=(1,), name=f"{name}_in")
-    h = VariationalDense(8, prior_scale=prior_scale, kl_divisor=N, activation="relu")(inp)
-    out = VariationalDense(PARAM_COUNT, prior_scale=prior_scale, kl_divisor=N)(h)
-    return tf.keras.Model(inp, out, name=name)
+class SummedModel(nn.Module):
+    """Per-feature nets -> sum of raw params (no distribution head, so predictions
+    are a plain tensor we could compare numerically). Carries its own config so the
+    save bundle can reconstruct it without the architecture being re-supplied."""
+
+    def __init__(self, n_features=2, prior_scale=0.7):
+        super().__init__()
+        self.n_features = n_features
+        self.prior_scale = prior_scale
+        self.nets = nn.ModuleList(FeatureNet(prior_scale) for _ in range(n_features))
+
+    def forward(self, X):
+        contribs = [self.nets[i](X[f"x{i}"]) for i in range(self.n_features)]
+        return torch.stack(contribs, dim=0).sum(dim=0)
+
+    def get_config(self):
+        return {"n_features": self.n_features, "prior_scale": self.prior_scale}
+
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
 
 
-def build_model(n_features=2):
-    inputs = {f"x{i}": tf.keras.Input(shape=(1,), name=f"x{i}") for i in range(n_features)}
-    nets = [make_feature_net(f"feat{i}") for i in range(n_features)]
-    contribs = [nets[i](inputs[f"x{i}"]) for i in range(n_features)]
-    summed = tf.keras.layers.Add(name="summed_output")(contribs)
-    # Return the raw params (not the distribution) so predictions are a plain
-    # tensor we can compare numerically across save/load.
-    return tf.keras.Model(inputs=inputs, outputs=summed)
+def save_model(model, path):
+    """The single save path (ADR-0006): config dict + state_dict, one file."""
+    torch.save({"config": model.get_config(), "state_dict": model.state_dict()}, path)
+
+
+def load_model(path):
+    """Reconstruct from the saved config alone, then load weights."""
+    bundle = torch.load(path, weights_only=True)
+    model = SummedModel.from_config(bundle["config"])
+    model.load_state_dict(bundle["state_dict"])
+    return model
 
 
 def weights_match(model_a, model_b, atol=1e-6):
-    """Elementwise comparison of every trainable+non-trainable weight, in order."""
-    wa, wb = model_a.get_weights(), model_b.get_weights()
-    if len(wa) != len(wb):
-        return False, f"weight count {len(wa)} != {len(wb)}"
+    """Elementwise comparison of every parameter + buffer, by name."""
+    sa, sb = model_a.state_dict(), model_b.state_dict()
+    if sa.keys() != sb.keys():
+        return False, f"key mismatch {set(sa) ^ set(sb)}"
     worst = 0.0
-    for a, b in zip(wa, wb):
+    for k in sa:
+        a, b = sa[k], sb[k]
         if a.shape != b.shape:
-            return False, f"shape {a.shape} != {b.shape}"
-        worst = max(worst, float(np.max(np.abs(a - b))) if a.size else 0.0)
-    return worst <= atol, f"max|Δw|={worst:.2e} over {len(wa)} arrays"
+            return False, f"{k} shape {tuple(a.shape)} != {tuple(b.shape)}"
+        worst = max(worst, float((a - b).abs().max()) if a.numel() else 0.0)
+    return worst <= atol, f"max|Δw|={worst:.2e} over {len(sa)} tensors"
 
 
 def toy_X(n_features=2):
-    rng = np.random.default_rng(7)
-    return {f"x{i}": rng.normal(size=(N, 1)).astype("float32") for i in range(n_features)}
+    g = torch.Generator().manual_seed(7)
+    return {f"x{i}": torch.randn(N, 1, generator=g) for i in range(n_features)}
 
 
 def main():
+    torch.manual_seed(0)
     failures = []
-    any_format_ok = False
 
     def check(name, ok, detail=""):
         tag = "PASS" if ok else "FAIL"
@@ -93,65 +114,48 @@ def main():
         if not ok:
             failures.append(name)
 
-    # --- [A] layer config round-trips with no closures ---
-    layer = VariationalDense(4, prior_scale=0.33, kl_divisor=99.0, activation="relu")
-    layer.build((None, 5))
+    # --- [A] module config round-trips with no closures ---
+    layer = VariationalDense(5, 4, prior_scale=0.33, kl_divisor=99.0, activation="relu")
     cfg = layer.get_config()
-    closure_free = all(
-        not callable(v) for v in cfg.values()
-    )
+    closure_free = all(not callable(v) for v in cfg.values())
     rebuilt = VariationalDense.from_config(cfg)
     check(
         "A: get_config/from_config is closure-free and preserves hyperparams",
         closure_free
         and rebuilt.prior_scale == 0.33
         and rebuilt.kl_divisor == 99.0
-        and rebuilt.units == 4,
+        and rebuilt.units == 4
+        and rebuilt.in_features == 5,
         f"prior_scale={rebuilt.prior_scale}, kl_divisor={rebuilt.kl_divisor}",
     )
 
-    # --- [B]/[C] full-model save -> load per format ---
+    # --- [B]/[C] full-model save -> load (single torch path) ---
     X = toy_X()
-    model = build_model()
+    model = SummedModel()
     set_kl_beta(model, 1.0)
-    _ = model(X)  # build
+    _ = model(X)  # exercise a forward pass before saving
 
     tmp = tempfile.mkdtemp(prefix="vd_spike_")
-    formats = [
-        ("keras_v3", os.path.join(tmp, "m.keras")),
-        ("h5", os.path.join(tmp, "m.h5")),
-        ("saved_model", os.path.join(tmp, "sm")),
-    ]
-
-    for fmt, path in formats:
-        try:
-            model.save(path)
-            loaded = tf.keras.models.load_model(path, custom_objects=CUSTOM_OBJECTS)
-            # [C] weights survive elementwise...
-            ok_w, detail_w = weights_match(model, loaded)
-            # ...and the reloaded model actually runs with the right shape.
-            out = loaded(X)
-            ok_run = tuple(out.shape) == (N, PARAM_COUNT)
-            ok = ok_w and ok_run
-            check(
-                f"B/C[{fmt}]: save->load reconstructs, weights survive, runs",
-                ok,
-                f"{detail_w}; out_shape={tuple(out.shape)}",
-            )
-            any_format_ok = any_format_ok or ok
-        except Exception as exc:  # noqa: BLE001 — we want to report, not crash
-            print(f"[SKIP] B/C[{fmt}]: format not usable here :: {type(exc).__name__}: {exc}")
+    path = os.path.join(tmp, "m.pt")
+    try:
+        save_model(model, path)
+        loaded = load_model(path)  # [B] reconstructs from saved config alone
+        ok_w, detail_w = weights_match(model, loaded)  # [C] weights survive
+        out = loaded(X)
+        ok_run = tuple(out.shape) == (N, PARAM_COUNT)
+        check(
+            "B/C: save->load reconstructs from config, weights survive, runs",
+            ok_w and ok_run,
+            f"{detail_w}; out_shape={tuple(out.shape)}",
+        )
+    except Exception as exc:  # noqa: BLE001 — report, don't crash
+        check("B/C: save->load", False, f"{type(exc).__name__}: {exc}")
 
     print()
-    if failures or not any_format_ok:
-        msg = []
-        if failures:
-            msg.append(f"{len(failures)} hard FAILURE(S): {failures}")
-        if not any_format_ok:
-            msg.append("no save format fully round-tripped")
-        print("SPIKE 2 RESULT: " + "; ".join(msg))
+    if failures:
+        print(f"SPIKE 2 RESULT: {len(failures)} FAILURE(S): {failures}")
         return 1
-    print("SPIKE 2 RESULT: ALL PASS — closure-free config round-trips save/load.")
+    print("SPIKE 2 RESULT: ALL PASS — config + state_dict round-trips save/load.")
     return 0
 
 

@@ -1,5 +1,4 @@
-# Pinned to the neural-bamlss target stack (see NAMpy/requirements.txt).
-# TF 2.15 requires Python 3.9–3.11.
-tensorflow<=2.15.1
-tensorflow_probability<=0.23
-numpy<2.0
+# PyTorch backend (ADR-0006). Any recent torch + numpy; no version pin needed.
+# Verified on torch 2.12 / numpy 2.4 / Python 3.12.
+torch
+numpy

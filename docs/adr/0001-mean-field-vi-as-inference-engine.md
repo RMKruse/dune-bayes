@@ -4,7 +4,11 @@ Date: 2026-06-02
 
 ## Status
 
-Accepted
+Accepted. **Amended by ADR-0006 (2026-06-03):** the inference *decision*
+(mean-field VI) is unchanged, but the backend is now **PyTorch**, not
+TensorFlow/TFP. Read "tfp variational Dense layers" below as the in-house PyTorch
+`VariationalDense` (ADR-0004); the reserved MCMC seam is now concretely
+**NumPyro/BlackJAX on JAX**.
 
 ## Context
 

@@ -4,7 +4,12 @@ Date: 2026-06-02
 
 ## Status
 
-Accepted
+Accepted. **Amended by ADR-0006 (2026-06-03):** the statistical contract below is
+unchanged, but the backend is now **PyTorch**. Translate the TFP/Keras idioms as
+follows: `tfd.MixtureSameFamily` → `torch.distributions.MixtureSameFamily`;
+`compile/fit` + KL-via-`add_loss` → a thin trainer with explicit KL collection;
+and the flagged "TFP variational-layer save/load is finicky" risk is **retired**
+by `state_dict`. arviz is unaffected.
 
 ## Context
 

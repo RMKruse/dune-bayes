@@ -1,8 +1,17 @@
 # neural-bamlss issues
 
+> **Backend superseded (ADR-0006, 2026-06-03).** These slices were written against
+> the TensorFlow / Keras 2 / TFP stack; the package now targets **PyTorch** (JAX/
+> NumPyro is the numerical future). The *behaviour* in each acceptance criterion
+> stands, but TF/TFP API nouns translate per ADR-0006: `add_loss` → explicit
+> module-walk KL; `tfd.*` → `torch.distributions.*`; `tf.keras.Model` →
+> `nn.Module`; `.keras`/SavedModel/H5 → `state_dict`. Issue 0001 (`VariationalDense`
+> atom) and 0015 (save/load) change the most; the spike-verified claims they cite
+> are historical and owed re-verification on PyTorch.
+
 Tracer-bullet vertical slices for the PRD in `docs/prd/0001-bayesian-feature-networks.md`.
 Each slice cuts end-to-end (atom → shape function → model → output → tests) and is
-verifiable on its own. All slices are AFK (every design decision is locked in ADR-0001…0005).
+verifiable on its own. All slices are AFK (every design decision is locked in ADR-0001…0006).
 
 Issues are also published on GitHub (`RMKruse/neural-bamlss`): PRD = #1, slices = #2–#16,
 epics = #17–#20. GitHub number = `slice number + 1`.
