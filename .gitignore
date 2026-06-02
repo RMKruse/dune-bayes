@@ -216,3 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Spike virtualenv (uv-managed Python 3.11 for spikes/)
+.venv-spike/
+
+# Upstream NAMpy clone kept locally as a baseline, not tracked here
+NAMpy/
