@@ -300,3 +300,26 @@ def test_feature_dropout_overridable(family):
         feature_dropout=0.3,
     )
     assert model.feature_dropout == pytest.approx(0.3)
+
+
+def test_feature_dropout_defaults_to_nampy_rate_when_deterministic_only(family):
+    """Deterministic-only formula defaults feature_dropout to 0.01 (issue 0021)."""
+    det_net = nn.Linear(IN, family.param_count, bias=False)
+    model = BayesianNAMLSS(
+        formula={"x1": det_net},
+        family=family,
+        n_obs=N_OBS,
+    )
+    assert model.feature_dropout == pytest.approx(0.01)
+
+
+def test_feature_dropout_explicit_override_on_deterministic(family):
+    """Explicit feature_dropout overrides the NAMpy 0.01 default (issue 0021)."""
+    det_net = nn.Linear(IN, family.param_count, bias=False)
+    model = BayesianNAMLSS(
+        formula={"x1": det_net},
+        family=family,
+        n_obs=N_OBS,
+        feature_dropout=0.0,
+    )
+    assert model.feature_dropout == pytest.approx(0.0)
