@@ -197,9 +197,14 @@ class VariationalDense(nn.Module):
 
 
 def _iter_variational_layers(model: nn.Module):
-    """Yield every VariationalDense in the module tree (depth-first)."""
+    """Yield every variational layer (VariationalDense or BayesianIntercept)."""
+    # Local import avoids a circular dependency: bayesian_intercept imports this module.
+    from neural_bamlss.layers.bayesian_intercept import (
+        BayesianIntercept,  # noqa: PLC0415
+    )
+
     for module in model.modules():
-        if isinstance(module, VariationalDense):
+        if isinstance(module, (VariationalDense, BayesianIntercept)):
             yield module
 
 
