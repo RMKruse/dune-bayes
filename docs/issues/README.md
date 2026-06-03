@@ -65,3 +65,22 @@ baselines, and a `feature_dropout` defaulting bug.
 | 0019 | #42 | Concrete distributional families | Foundation | 0018 |
 | 0020 | #39 | Deterministic baseline shape functions (MLP, ResNet) | Foundation | — |
 | 0021 | #40 | Fix feature_dropout default no-op (bug) | Foundation | — |
+
+## DataModule slices (gap-fill, 2026-06-04)
+
+The `data/` component promised in the package layout (CLAUDE.md) was never built:
+the PRD said "reuse NAMpy's `DataModule`", but the ADR-0006 amendment made NAMpy
+reference-only, leaving the gap. These slices reimplement it: pandas DataFrame →
+model-ready tensors, sklearn-style preprocessing, and the N-for-KL/N convenience.
+pandas becomes an explicit runtime dependency (floor pin) with slice 0022.
+
+| # | GitHub | Slice | Epic | Blocked by |
+|---|--------|-------|------|-----------|
+| 0022 | #49 | DataModule walking skeleton: tabular data → tensors + N | Foundation | — |
+| 0023 | #50 | Numeric preprocessing: train-fit scaling + inverse for plot axes | Foundation | 0022 |
+| 0024 | #51 | Categorical encoding feeding random effects | Goal 2 | 0022 |
+| 0025 | #52 | DataModule state round-trip | Foundation | 0023, 0024 |
+| 0026 | #53 | Minibatching via torch.utils.data (KL/N stays full-data N) | Foundation | 0022 |
+
+Dependency root is **0022** (labeled `blocking` on GitHub); 0023/0024 parallelize
+after it.
