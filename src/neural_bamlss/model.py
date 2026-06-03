@@ -74,7 +74,8 @@ class BayesianNAMLSS(nn.Module):
         self.n_obs: int | None = int(n_obs) if n_obs is not None else None
 
         if feature_dropout is None:
-            self.feature_dropout = 0.0 if _has_bayesian_nets(formula) else 0.0
+            # 0.01 is NAMpy's default; 0.0 when weight posterior supplies stochasticity.
+            self.feature_dropout = 0.0 if _has_bayesian_nets(formula) else 0.01
         else:
             self.feature_dropout = float(feature_dropout)
 
