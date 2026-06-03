@@ -1,4 +1,6 @@
-"""BayesianNAMLSS — the walking skeleton with KL warm-up (ADR-0001/0003/0004, issue 0003/0004 / GitHub #4/#5).
+"""BayesianNAMLSS — walking skeleton with KL warm-up.
+
+ADR-0001/0003/0004, issue 0003/0004/0007 / GitHub #4/#5/#8.
 
 Additive Bayesian model: per-feature shape functions → sum → family distribution.
 Training objective: mean-NLL + KL/N (negative ELBO).
@@ -16,6 +18,8 @@ Design:
   - forward() is a single stochastic pass (call()-style, ADR-0003).
   - model.Loss: callable (X_dict, y) → scalar ELBO loss (NLL + KL/N).
   - fit(): lightweight training loop; returns a history dict.
+  - sample_posterior_predictive(X, T): MixtureSameFamily posterior predictive
+    backed by LogLikSampler (issue 0007, ADR-0003).
 """
 
 from __future__ import annotations
@@ -176,3 +180,32 @@ class BayesianNAMLSS(nn.Module):
 
         self.eval()
         return history
+
+    # ── posterior predictive ──────────────────────────────────────────────────
+
+    def sample_posterior_predictive(
+        self,
+        X: dict[str, torch.Tensor],
+        T: int = 200,
+    ) -> torch.distributions.MixtureSameFamily:
+        """Build the T-draw posterior predictive as a MixtureSameFamily.
+
+        Runs T stochastic forward passes and assembles a uniform mixture over
+        the resulting family distributions (ADR-0003).  Spread across components
+        = epistemic uncertainty; within each component = family aleatoric.
+
+        Args:
+            X: Feature dict {name: Tensor[n, in_features]}.
+            T: Number of posterior weight draws. Defaults to 200 (T_predict).
+
+        Returns:
+            MixtureSameFamily with batch_shape (n,), backed by LogLikSampler.
+        """
+        from neural_bamlss.sampling.log_lik_sampler import LogLikSampler
+
+        # Dummy y of zeros — only summed_samples and predictive are used here.
+        # pointwise_loglik requires y; call LogLikSampler directly for WAIC/LOO.
+        n = next(iter(X.values())).shape[0]
+        y_dummy = torch.zeros(n)
+        result = LogLikSampler()(self, X, y_dummy, T=T)
+        return result.predictive
