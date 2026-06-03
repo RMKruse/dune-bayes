@@ -24,6 +24,7 @@ Design:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -209,3 +210,69 @@ class BayesianNAMLSS(nn.Module):
         y_dummy = torch.zeros(n)
         result = LogLikSampler()(self, X, y_dummy, T=T)
         return result.predictive
+
+    # ── save / load ───────────────────────────────────────────────────────────
+
+    def save(self, path: str | Path) -> None:
+        """Save model weights and config to a checkpoint file.
+
+        Uses torch.save to write a dict containing the state_dict and the
+        hyperparameters needed to reconstruct the model (n_obs, feature_dropout,
+        feature_names).  Architecture must be supplied by the caller on load.
+
+        H5 format is not supported: HDF5 weight-name collisions across variational
+        layers cause silent corruption (spike-confirmed on the TF/Keras stack);
+        use .pt instead.
+
+        Args:
+            path: Destination file path.  Must not end in .h5.
+
+        Raises:
+            ValueError: If path ends with .h5.
+        """
+        path = Path(path)
+        if path.suffix.lower() == ".h5":
+            raise ValueError(
+                f"H5 format is not supported for BayesianNAMLSS ({path}). "
+                "HDF5 weight-name collisions across variational layers cause "
+                "silent corruption. Use .pt format with save()/load() instead."
+            )
+        checkpoint = {
+            "state_dict": self.state_dict(),
+            "n_obs": self.n_obs,
+            "feature_dropout": self.feature_dropout,
+            "feature_names": self.feature_names,
+        }
+        torch.save(checkpoint, path)
+
+    @classmethod
+    def load(
+        cls,
+        path: str | Path,
+        formula: dict[str, nn.Module],
+        family: Any,
+    ) -> "BayesianNAMLSS":
+        """Load a BayesianNAMLSS from a checkpoint written by save().
+
+        The caller must supply a formula with the same architecture as the
+        saved model — this is the standard PyTorch pattern of separating
+        architecture construction from weight restoration.
+
+        Args:
+            path: Path to the checkpoint file written by save().
+            formula: Mapping of feature name → shape function with the same
+                architecture as the saved model.
+            family: Family object matching the saved model.
+
+        Returns:
+            BayesianNAMLSS with weights restored from the checkpoint.
+        """
+        checkpoint = torch.load(path, weights_only=True)
+        model = cls(
+            formula=formula,
+            family=family,
+            n_obs=checkpoint["n_obs"],
+            feature_dropout=checkpoint["feature_dropout"],
+        )
+        model.load_state_dict(checkpoint["state_dict"])
+        return model
