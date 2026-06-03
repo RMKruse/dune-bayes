@@ -46,3 +46,41 @@ epics = #17–#20. GitHub number = `slice number + 1`.
 | 0015 | #16 | Save/load round-trip | Foundation | 0003 |
 
 Dependency root is **0001**; the skeleton **0003** unblocks most downstream work.
+
+## Gap-fill slices (post-implementation review of `dev`, 2026-06-03)
+
+> **Numbering note:** the `GitHub# = slice# + 1` rule applied only to the original
+> batch. Epics took #17–#20 and PRs/merges consumed later numbers, so these slices
+> carry their **actual** GitHub numbers below — do not infer them from the slice #.
+
+These close gaps between the PRD's stated scope and what shipped on `dev`: the
+formula-string surface, multiple response families, registered deterministic
+baselines, and a `feature_dropout` defaulting bug.
+
+| # | GitHub | Slice | Epic | Blocked by |
+|---|--------|-------|------|-----------|
+| 0016 | #37 | Formula-string parser — additive terms | Foundation | — |
+| 0017 | #41 | Formula-string parser — interaction terms | Foundation | 0016 |
+| 0018 | #38 | BaseFamily contract | Foundation | — |
+| 0019 | #42 | Concrete distributional families | Foundation | 0018 |
+| 0020 | #39 | Deterministic baseline shape functions (MLP, ResNet) | Foundation | — |
+| 0021 | #40 | Fix feature_dropout default no-op (bug) | Foundation | — |
+
+## DataModule slices (gap-fill, 2026-06-04)
+
+The `data/` component promised in the package layout (CLAUDE.md) was never built:
+the PRD said "reuse NAMpy's `DataModule`", but the ADR-0006 amendment made NAMpy
+reference-only, leaving the gap. These slices reimplement it: pandas DataFrame →
+model-ready tensors, sklearn-style preprocessing, and the N-for-KL/N convenience.
+pandas becomes an explicit runtime dependency (floor pin) with slice 0022.
+
+| # | GitHub | Slice | Epic | Blocked by |
+|---|--------|-------|------|-----------|
+| 0022 | #49 | DataModule walking skeleton: tabular data → tensors + N | Foundation | — |
+| 0023 | #50 | Numeric preprocessing: train-fit scaling + inverse for plot axes | Foundation | 0022 |
+| 0024 | #51 | Categorical encoding feeding random effects | Goal 2 | 0022 |
+| 0025 | #52 | DataModule state round-trip | Foundation | 0023, 0024 |
+| 0026 | #53 | Minibatching via torch.utils.data (KL/N stays full-data N) | Foundation | 0022 |
+
+Dependency root is **0022** (labeled `blocking` on GitHub); 0023/0024 parallelize
+after it.
