@@ -1,18 +1,20 @@
-"""Formula-string parser — additive terms (issue 0016 / GitHub #37).
+"""Formula-string parser — additive and interaction terms (issue 0016–0017).
 
-Turns ``"y ~ BayesianMLP(x1) + NeuralLinearMLP(x2)"`` into the
+Turns ``"y ~ BayesianMLP(x1) + BayesianMLP(x2):BayesianMLP(x3)"`` into the
 ``dict[str, nn.Module]`` formula that ``BayesianNAMLSS`` consumes, resolving
 shape-function names via ``ShapeFunctionRegistry``. Reimplemented from
 scratch per ADR-0006 (amended) — not ported from NAMpy's TF ``FormulaHandler``.
 
-Scope: additive ``+``-separated single-input terms; interactions (``:``) are
-issue 0017.
+Interaction syntax: ``Net(x1):Net(x2)`` creates a single joint net over both
+inputs, keyed ``"x1:x2"`` in the formula dict, with net type and kwargs taken
+from the first factor (ADR-0005, issue 0017 / GitHub #41).
 """
 
 from __future__ import annotations
 
 import ast
 import inspect
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -37,23 +39,58 @@ class Term:
 
 
 @dataclass(frozen=True)
+class InteractionTerm:
+    """A ``:``-joined interaction term, e.g. ``BayesianMLP(x1):BayesianMLP(x2)``.
+
+    The joint net uses the shape name and kwargs from the first factor (ADR-0005).
+    The formula dict key is the colon-joined feature names (``"x1:x2"``).
+
+    Args:
+        shape_name: Registry key from the first factor.
+        features: Feature names for all factors, in formula order.
+        kwargs: Constructor keyword arguments from the first factor.
+    """
+
+    shape_name: str
+    features: tuple[str, ...]
+    kwargs: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def key(self) -> str:
+        """Formula dict key: colon-joined feature names."""
+        return ":".join(self.features)
+
+
+@dataclass(frozen=True)
 class ParsedFormula:
     """Result of :func:`parse_formula`.
 
     Args:
         response: Response name left of ``~``.
-        terms: Parsed additive terms, in formula order.
+        terms: Parsed terms (additive and/or interaction), in formula order.
     """
 
     response: str
-    terms: tuple[Term, ...]
+    terms: tuple[Term | InteractionTerm, ...]
 
 
-def _flatten_additive(node: ast.expr) -> list[ast.Call]:
-    """Flatten a left-nested ``a + b + c`` BinOp tree into call nodes in order."""
+def _transform_interactions(rhs: str) -> str:
+    # Replace the formula `:` between calls with `*` so ast.parse can handle
+    # it: `Net(x1):Net(x2)` → `Net(x1)*Net(x2)`. The regex matches `)` followed
+    # by optional whitespace, `:`, optional whitespace, and an identifier start
+    # (uppercase or lowercase letter / underscore), which unambiguously identifies
+    # a term boundary — colon inside kwargs (dict literals) never follows `)`.
+    return re.sub(r"\)\s*:\s*(?=[A-Za-z_])", ")*", rhs)
+
+
+def _flatten_additive(node: ast.expr) -> list[ast.expr]:
+    """Flatten a ``+``-tree into top-level term nodes (Call or Mult BinOp)."""
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
         return _flatten_additive(node.left) + _flatten_additive(node.right)
     if isinstance(node, ast.Call):
+        return [node]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        # Interaction term (`:` rewritten to `*` by _transform_interactions).
         return [node]
     raise ValueError(
         f"Cannot parse formula term {ast.unparse(node)!r}: expected "
@@ -61,18 +98,20 @@ def _flatten_additive(node: ast.expr) -> list[ast.Call]:
     )
 
 
-def _parse_term(call: ast.Call) -> Term:
-    """Turn one ``ShapeName(feature, key=value, ...)`` call node into a Term."""
-    if not isinstance(call.func, ast.Name):
-        raise ValueError(
-            f"Cannot parse formula term {ast.unparse(call)!r}: term must be "
-            "a plain ShapeName(feature, ...) call."
-        )
-    if len(call.args) != 1 or not isinstance(call.args[0], ast.Name):
-        raise ValueError(
-            f"Term {ast.unparse(call)!r} must have exactly one feature name "
-            "as its positional argument (interactions are issue 0017)."
-        )
+def _flatten_interaction(node: ast.expr) -> list[ast.Call]:
+    """Flatten a ``*``-tree (rewritten ``:`` interaction) into factor calls."""
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _flatten_interaction(node.left) + _flatten_interaction(node.right)
+    if isinstance(node, ast.Call):
+        return [node]
+    raise ValueError(
+        f"Cannot parse interaction factor {ast.unparse(node)!r}: "
+        "each factor must be a ShapeName(feature, ...) call."
+    )
+
+
+def _parse_kwargs(call: ast.Call) -> dict[str, Any]:
+    """Extract and literal-eval keyword arguments from a call node."""
     kwargs: dict[str, Any] = {}
     for kw in call.keywords:
         if kw.arg is None:  # **something — not a formula construct
@@ -88,21 +127,70 @@ def _parse_term(call: ast.Call) -> Term:
                 f"Term {ast.unparse(call)!r}: keyword {kw.arg!r} must be a "
                 "literal value (number, string, tuple, bool)."
             ) from None
-    return Term(shape_name=call.func.id, feature=call.args[0].id, kwargs=kwargs)
+    return kwargs
+
+
+def _parse_term(call: ast.Call) -> Term:
+    """Turn one ``ShapeName(feature, key=value, ...)`` call node into a Term."""
+    if not isinstance(call.func, ast.Name):
+        raise ValueError(
+            f"Cannot parse formula term {ast.unparse(call)!r}: term must be "
+            "a plain ShapeName(feature, ...) call."
+        )
+    if len(call.args) != 1 or not isinstance(call.args[0], ast.Name):
+        raise ValueError(
+            f"Term {ast.unparse(call)!r} must have exactly one feature name "
+            "as its positional argument."
+        )
+    return Term(
+        shape_name=call.func.id,
+        feature=call.args[0].id,
+        kwargs=_parse_kwargs(call),
+    )
+
+
+def _parse_interaction(factors: list[ast.Call]) -> InteractionTerm:
+    """Build an InteractionTerm from the factor call nodes of a ``:``-joined term.
+
+    Shape name and kwargs come from the first factor (ADR-0005); remaining
+    factors contribute only their feature name.
+    """
+    if len(factors) < 2:
+        raise ValueError("An interaction term requires at least two factors.")
+    for call in factors:
+        if not isinstance(call.func, ast.Name):
+            raise ValueError(
+                f"Interaction factor {ast.unparse(call)!r} must be a plain "
+                "ShapeName(feature, ...) call."
+            )
+        if len(call.args) != 1 or not isinstance(call.args[0], ast.Name):
+            raise ValueError(
+                f"Interaction factor {ast.unparse(call)!r} must have exactly "
+                "one feature name as its positional argument."
+            )
+    return InteractionTerm(
+        shape_name=factors[0].func.id,  # type: ignore[union-attr]
+        features=tuple(c.args[0].id for c in factors),  # type: ignore[union-attr]
+        kwargs=_parse_kwargs(factors[0]),
+    )
 
 
 def parse_formula(formula: str) -> ParsedFormula:
-    """Parse an additive formula string.
+    """Parse an additive/interaction formula string.
 
     Args:
-        formula: e.g. ``"y ~ BayesianMLP(x1, prior_scale=0.5) + MLP(x2)"``.
+        formula: e.g.
+            ``"y ~ BayesianMLP(x1) + BayesianMLP(x2):BayesianMLP(x3)"``.
+            Interaction terms use ``:`` to join two or more factor calls into a
+            single joint net (ADR-0005, issue 0017).
 
     Returns:
         The parsed response name and terms.
 
     Raises:
-        ValueError: If the formula is not ``response ~ term + term + ...``
-            with each term a ``ShapeName(feature, key=literal, ...)`` call.
+        ValueError: If the formula is not ``response ~ term [+ term ...]``
+            with each term a ``ShapeName(feature, ...)`` call or a
+            ``:``-joined chain of such calls.
     """
     if formula.count("~") != 1:
         raise ValueError(
@@ -115,31 +203,72 @@ def parse_formula(formula: str) -> ParsedFormula:
         raise ValueError(
             f"Response name {response!r} (left of '~') must be a valid identifier."
         )
-    # The RHS grammar is a subset of Python expressions: '+'-chained calls
-    # with literal keywords. Parsing it as Python handles nesting (tuples in
-    # kwargs) that naive string-splitting gets wrong.
+    # `:` is not a valid binary operator in Python expressions.  Rewrite
+    # `Net(x1):Net(x2)` → `Net(x1)*Net(x2)` so ast.parse can handle it; the
+    # resulting Mult BinOps are then distinguished from Add BinOps in the tree.
+    rhs_transformed = _transform_interactions(rhs.strip())
     try:
-        tree = ast.parse(rhs.strip(), mode="eval")
+        tree = ast.parse(rhs_transformed, mode="eval")
     except SyntaxError as err:
         raise ValueError(f"Cannot parse formula RHS {rhs.strip()!r}: {err}") from None
-    terms = tuple(_parse_term(call) for call in _flatten_additive(tree.body))
+
+    parsed_terms: list[Term | InteractionTerm] = []
+    for node in _flatten_additive(tree.body):
+        if isinstance(node, ast.Call):
+            parsed_terms.append(_parse_term(node))
+        else:
+            # Mult BinOp — an interaction chain.
+            parsed_terms.append(_parse_interaction(_flatten_interaction(node)))
+
     seen: set[str] = set()
-    for term in terms:
-        # The formula dict is keyed by feature name — a duplicate would
-        # silently drop an earlier term, so reject it outright.
-        if term.feature in seen:
-            raise ValueError(
-                f"Feature {term.feature!r} appears in more than one term; "
-                "each feature may appear once in an additive formula."
-            )
-        seen.add(term.feature)
-    return ParsedFormula(response=response, terms=terms)
+    for term in parsed_terms:
+        # Collect all feature names used by this term to detect duplicates.
+        features = (
+            term.features if isinstance(term, InteractionTerm) else (term.feature,)
+        )
+        for feat in features:
+            if feat in seen:
+                raise ValueError(
+                    f"Feature {feat!r} appears in more than one term; "
+                    "each feature may appear once in a formula."
+                )
+            seen.add(feat)
+    return ParsedFormula(response=response, terms=tuple(parsed_terms))
+
+
+def _instantiate(
+    shape_name: str,
+    in_features: int,
+    kwargs: dict[str, Any],
+    family: Any,
+    n_obs: int | None,
+    term_repr: str,
+) -> nn.Module:
+    """Resolve a shape name, wire kl_divisor, and instantiate."""
+    shape_cls = ShapeFunctionRegistry.get(shape_name)
+    if shape_cls is None:
+        raise ValueError(
+            f"Unknown shape function {shape_name!r} in term {term_repr!r}. "
+            f"Registered names in ShapeFunctionRegistry: "
+            f"{ShapeFunctionRegistry.names()}."
+        )
+    kwargs = dict(kwargs)
+    if n_obs is not None and "kl_divisor" not in kwargs:
+        # Signature check, not a Bayesian-ness check: deterministic shape
+        # functions simply have no kl_divisor parameter to wire.
+        if "kl_divisor" in inspect.signature(shape_cls.__init__).parameters:
+            kwargs["kl_divisor"] = float(n_obs)
+    return shape_cls(in_features=in_features, param_count=family.param_count, **kwargs)
 
 
 def build_formula(
     parsed: ParsedFormula, family: Any, n_obs: int | None = None
 ) -> dict[str, nn.Module]:
     """Instantiate shape functions for each parsed term.
+
+    Additive terms produce ``{feature: Net(in_features=1, ...)}``.
+    Interaction terms produce ``{"x1:x2": Net(in_features=2, ...)}`` — a
+    single joint net over the concatenated inputs (ADR-0005, issue 0017).
 
     Args:
         parsed: Output of :func:`parse_formula`.
@@ -150,7 +279,7 @@ def build_formula(
             and that /N lives inside each VariationalDense.
 
     Returns:
-        Mapping of feature name → shape-function instance, the formula dict
+        Mapping of key → shape-function instance, the formula dict
         ``BayesianNAMLSS`` consumes.
 
     Raises:
@@ -158,20 +287,22 @@ def build_formula(
     """
     formula: dict[str, nn.Module] = {}
     for term in parsed.terms:
-        shape_cls = ShapeFunctionRegistry.get(term.shape_name)
-        if shape_cls is None:
-            raise ValueError(
-                f"Unknown shape function {term.shape_name!r} in term "
-                f"{term.shape_name}({term.feature}). Registered names in "
-                f"ShapeFunctionRegistry: {ShapeFunctionRegistry.names()}."
+        if isinstance(term, InteractionTerm):
+            formula[term.key] = _instantiate(
+                shape_name=term.shape_name,
+                in_features=len(term.features),
+                kwargs=term.kwargs,
+                family=family,
+                n_obs=n_obs,
+                term_repr=term.key,
             )
-        kwargs = dict(term.kwargs)
-        if n_obs is not None and "kl_divisor" not in kwargs:
-            # Signature check, not a Bayesian-ness check: deterministic shape
-            # functions simply have no kl_divisor parameter to wire.
-            if "kl_divisor" in inspect.signature(shape_cls.__init__).parameters:
-                kwargs["kl_divisor"] = float(n_obs)
-        formula[term.feature] = shape_cls(
-            in_features=1, param_count=family.param_count, **kwargs
-        )
+        else:
+            formula[term.feature] = _instantiate(
+                shape_name=term.shape_name,
+                in_features=1,
+                kwargs=term.kwargs,
+                family=family,
+                n_obs=n_obs,
+                term_repr=f"{term.shape_name}({term.feature})",
+            )
     return formula
