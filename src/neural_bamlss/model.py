@@ -1,4 +1,4 @@
-"""BayesianNAMLSS — the walking skeleton (ADR-0001/0003/0004, issue 0003 / GitHub #4).
+"""BayesianNAMLSS — the walking skeleton with KL warm-up (ADR-0001/0003/0004, issue 0003/0004 / GitHub #4/#5).
 
 Additive Bayesian model: per-feature shape functions → sum → family distribution.
 Training objective: mean-NLL + KL/N (negative ELBO).
@@ -26,7 +26,7 @@ import torch
 import torch.nn as nn
 
 from neural_bamlss.layers import collect_kl
-from neural_bamlss.layers.variational_dense import VariationalDense
+from neural_bamlss.layers.variational_dense import VariationalDense, set_kl_beta
 
 
 def _has_bayesian_nets(formula: dict[str, nn.Module]) -> bool:
@@ -121,14 +121,23 @@ class BayesianNAMLSS(nn.Module):
         y: torch.Tensor,
         epochs: int = 100,
         lr: float = 1e-3,
+        warmup_epochs: int = 10,
+        callbacks: list | None = None,
     ) -> dict[str, list[float]]:
         """Train the model on (X, y) using the ELBO loss.
+
+        KL warm-up (ADR-0001, issue 0004) is auto-injected: β ramps from 0→1
+        over the first warmup_epochs epochs, guarding against posterior collapse.
+        Set warmup_epochs=0 to disable.
 
         Args:
             X: Feature dict; each value is (n_obs, in_features).
             y: Target tensor of shape (n_obs,).
             epochs: Number of full-data gradient steps.
             lr: Adam learning rate.
+            warmup_epochs: Epochs over which β ramps 0→1. 0 disables warm-up.
+            callbacks: Optional list of callables with signature (epoch: int) → None,
+                called at the start of each epoch alongside the warm-up callback.
 
         Returns:
             History dict with keys 'loss', 'nll', 'kl' — one value per epoch.
@@ -139,8 +148,20 @@ class BayesianNAMLSS(nn.Module):
         opt = torch.optim.Adam(self.parameters(), lr=lr)
         history: dict[str, list[float]] = {"loss": [], "nll": [], "kl": []}
 
+        # Build the epoch-start callback list: warm-up is always first when active.
+        _callbacks: list = []
+        if warmup_epochs > 0:
+            _callbacks.append(
+                lambda epoch: set_kl_beta(self, min(1.0, epoch / warmup_epochs))
+            )
+        if callbacks:
+            _callbacks.extend(callbacks)
+
         self.train()
-        for _ in range(epochs):
+        for epoch in range(epochs):
+            for cb in _callbacks:
+                cb(epoch)
+
             opt.zero_grad()
             dist = self(X)
             nll = -dist.log_prob(y).mean()
