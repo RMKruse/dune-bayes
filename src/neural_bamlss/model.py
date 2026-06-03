@@ -68,6 +68,8 @@ class BayesianNAMLSS(nn.Module):
     ) -> None:
         super().__init__()
         self.feature_names: list[str] = list(formula.keys())
+        # Response name captured by from_formula(); None for dict-built models.
+        self.response: str | None = None
         # Register all shape functions as sub-modules so collect_kl() reaches them.
         self.nets = nn.ModuleDict(formula)
         self.family = family
@@ -77,6 +79,53 @@ class BayesianNAMLSS(nn.Module):
             self.feature_dropout = 0.0 if _has_bayesian_nets(formula) else 0.0
         else:
             self.feature_dropout = float(feature_dropout)
+
+    # ── formula-string construction ───────────────────────────────────────────
+
+    @classmethod
+    def from_formula(
+        cls,
+        formula: str,
+        family: Any,
+        n_obs: int | None = None,
+        feature_dropout: float | None = None,
+    ) -> "BayesianNAMLSS":
+        """Construct a BayesianNAMLSS from a formula string (issue 0016).
+
+        Parses an additive formula like
+        ``"y ~ BayesianMLP(x1, prior_scale=0.5) + NeuralLinearMLP(x2)"``,
+        resolves each term via ShapeFunctionRegistry, and builds the model.
+        The response name left of ``~`` is stored as ``model.response``.
+        When n_obs is given, it is auto-wired as kl_divisor into each
+        Bayesian term (unless that term sets kl_divisor itself), so the
+        objective is the documented mean-NLL + KL/N.
+
+        Args:
+            formula: Additive formula string; each term is a registered
+                shape-function name applied to one feature, with optional
+                literal keyword arguments forwarded to its constructor.
+            family: Family object with .param_count, as in __init__.
+            n_obs: As in __init__.
+            feature_dropout: As in __init__.
+
+        Returns:
+            BayesianNAMLSS over the parsed terms.
+
+        Raises:
+            ValueError: If the formula cannot be parsed or names an
+                unregistered shape function.
+        """
+        from neural_bamlss.formula import build_formula, parse_formula
+
+        parsed = parse_formula(formula)
+        model = cls(
+            formula=build_formula(parsed, family=family, n_obs=n_obs),
+            family=family,
+            n_obs=n_obs,
+            feature_dropout=feature_dropout,
+        )
+        model.response = parsed.response
+        return model
 
     # ── forward ───────────────────────────────────────────────────────────────
 

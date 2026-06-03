@@ -41,3 +41,12 @@ class ShapeFunctionRegistry:
             The class, or None.
         """
         return cls._registry.get(name)
+
+    @classmethod
+    def names(cls) -> list[str]:
+        """Return the registered shape-function names, sorted.
+
+        Returns:
+            Sorted list of registry keys.
+        """
+        return sorted(cls._registry)
