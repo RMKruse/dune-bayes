@@ -129,16 +129,28 @@ class BayesianNAMLSS(nn.Module):
 
     # ── forward ───────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _get_input(X: dict[str, torch.Tensor], name: str) -> torch.Tensor:
+        # Interaction keys ("x1:x2") are fed by concatenating constituent tensors
+        # along the feature dimension; simple keys are looked up directly.
+        if ":" in name:
+            return torch.cat([X[f] for f in name.split(":")], dim=-1)
+        return X[name]
+
     def forward(self, X: dict[str, torch.Tensor]) -> torch.distributions.Distribution:
         """Single stochastic forward pass.
 
         Args:
             X: Dict mapping feature name → tensor of shape (batch, in_features).
+                Interaction terms (keyed ``"x1:x2"``) are fed by concatenating
+                ``X["x1"]`` and ``X["x2"]`` along the feature dimension.
 
         Returns:
             A torch.distributions.Distribution with batch_shape (batch,).
         """
-        contribs = [self.nets[name](X[name]) for name in self.feature_names]
+        contribs = [
+            self.nets[name](self._get_input(X, name)) for name in self.feature_names
+        ]
         # Sum contributions (additive model); stack → sum over feature dim.
         summed = torch.stack(contribs, dim=0).sum(dim=0)  # (batch, param_count)
         if self.training and self.feature_dropout > 0.0:
