@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "torch>=2.12",
     "numpy",
+    "pandas>=2.2",
     "arviz",
     "scikit-learn",
     "matplotlib",
@@ -20,6 +21,7 @@ dev = [
     "pytest",
     "ruff",
     "mypy",
+    "pandas-stubs",
 ]
 
 [tool.hatch.build.targets.wheel]

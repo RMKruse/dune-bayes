@@ -90,6 +90,7 @@ class BayesianNAMLSS(nn.Module):
         family: Any,
         n_obs: int | None = None,
         feature_dropout: float | None = None,
+        data: Any = None,
     ) -> "BayesianNAMLSS":
         """Construct a BayesianNAMLSS from a formula string (issue 0016).
 
@@ -108,6 +109,8 @@ class BayesianNAMLSS(nn.Module):
             family: Family object with .param_count, as in __init__.
             n_obs: As in __init__.
             feature_dropout: As in __init__.
+            data: Optional DataModule (issue 0022); supplies n_obs from the
+                training data so KL/N needs no explicit n_obs argument.
 
         Returns:
             BayesianNAMLSS over the parsed terms.
@@ -118,6 +121,8 @@ class BayesianNAMLSS(nn.Module):
         """
         from neural_bamlss.formula import build_formula, parse_formula
 
+        if data is not None and n_obs is None:
+            n_obs = data.n_obs
         parsed = parse_formula(formula)
         model = cls(
             formula=build_formula(parsed, family=family, n_obs=n_obs),
@@ -184,8 +189,8 @@ class BayesianNAMLSS(nn.Module):
 
     def fit(
         self,
-        X: dict[str, torch.Tensor],
-        y: torch.Tensor,
+        X: dict[str, torch.Tensor] | Any,
+        y: torch.Tensor | None = None,
         epochs: int = 100,
         lr: float = 1e-3,
         warmup_epochs: int = 10,
@@ -198,8 +203,10 @@ class BayesianNAMLSS(nn.Module):
         Set warmup_epochs=0 to disable.
 
         Args:
-            X: Feature dict; each value is (n_obs, in_features).
-            y: Target tensor of shape (n_obs,).
+            X: Feature dict; each value is (n_obs, in_features). May instead
+                be a DataModule (issue 0022), in which case y is taken from it
+                and must not be passed.
+            y: Target tensor of shape (n_obs,). None when X is a DataModule.
             epochs: Number of full-data gradient steps.
             lr: Adam learning rate.
             warmup_epochs: Epochs over which β ramps 0→1. 0 disables warm-up.
@@ -209,6 +216,13 @@ class BayesianNAMLSS(nn.Module):
         Returns:
             History dict with keys 'loss', 'nll', 'kl' — one value per epoch.
         """
+        from neural_bamlss.data import DataModule
+
+        if isinstance(X, DataModule):
+            data = X
+            X, y = data.features, data.target
+        if y is None:
+            raise TypeError("fit() requires y unless X is a DataModule")
         if self.n_obs is None:
             self.n_obs = int(y.shape[0])
 
