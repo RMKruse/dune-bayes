@@ -94,5 +94,5 @@ def test_mixed_interaction_formula_trains_end_to_end():
     # Formula dict has additive entry for x1 and interaction entry for x2:x3.
     assert set(model.nets.keys()) == {"x1", "x2:x3"}
 
-    loss = model.Loss(X, y)
+    loss = model.loss(X, y)
     assert loss.isfinite(), f"ELBO loss is not finite: {loss}"

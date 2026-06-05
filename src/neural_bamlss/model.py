@@ -16,8 +16,8 @@ Design:
     Defaults to 0 when any Bayesian net is present (Bayesian weights supply
     the stochasticity — no need for additional feature noise).
   - forward() is a single stochastic pass (call()-style, ADR-0003).
-  - model.Loss: callable (X_dict, y) → scalar ELBO loss (NLL + KL/N).
-  - fit(): lightweight training loop; returns a history dict.
+  - model.loss(X_dict, y): scalar ELBO loss (NLL + KL/N).
+  - fit(): lightweight training loop built on the same loss; returns a history dict.
   - sample_posterior_predictive(X, T): MixtureSameFamily posterior predictive
     backed by LogLikSampler (issue 0007, ADR-0003).
 """
@@ -196,21 +196,30 @@ class BayesianNAMLSS(nn.Module):
 
     # ── loss ──────────────────────────────────────────────────────────────────
 
-    @property
-    def Loss(self):
-        """ELBO loss callable: (X_dict, y) → scalar tensor.
+    def _loss_components(
+        self, X: dict[str, torch.Tensor], y: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """One stochastic pass → (loss, nll, kl); shared by loss() and fit()."""
+        dist = self(X)
+        nll = -dist.log_prob(y).mean()
+        kl = collect_kl(self)
+        return nll + kl, nll, kl
 
-        Returns mean-NLL + KL/N.  KL/N is already scaled by kl_divisor inside
-        each VariationalDense; collect_kl sums the scaled values.
+    def loss(self, X: dict[str, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
+        """ELBO loss: mean-NLL + KL/N as a scalar tensor.
+
+        KL/N is already scaled by kl_divisor inside each VariationalDense;
+        collect_kl sums the scaled values.
+
+        Args:
+            X: Feature dict mapping name → tensor of shape (batch, in_features).
+            y: Target tensor of shape (batch,).
+
+        Returns:
+            Scalar loss tensor (one reparameterization draw).
         """
-
-        def _loss(X: dict[str, torch.Tensor], y: torch.Tensor) -> torch.Tensor:
-            dist = self(X)
-            nll = -dist.log_prob(y).mean()
-            kl = collect_kl(self)
-            return nll + kl
-
-        return _loss
+        total, _, _ = self._loss_components(X, y)
+        return total
 
     # ── fit ───────────────────────────────────────────────────────────────────
 
@@ -278,8 +287,8 @@ class BayesianNAMLSS(nn.Module):
         if callbacks:
             _callbacks.extend(callbacks)
 
-        # Prepare the minibatch generator if requested (issue 0026).
-        # The generator is reset each epoch for reproducible intra-epoch order.
+        # Full-batch training is minibatching with a single batch (issue 0026):
+        # one loop, one history-append; the mean over one batch is the value.
         use_minibatch = batch_size is not None and data_module is not None
 
         self.train()
@@ -293,39 +302,27 @@ class BayesianNAMLSS(nn.Module):
                 gen: torch.Generator | None = None
                 if seed is not None:
                     gen = torch.Generator().manual_seed(seed + epoch)
-                loader = data_module.dataloader(  # type: ignore[union-attr]
+                batches = data_module.dataloader(  # type: ignore[union-attr]
                     batch_size=batch_size, generator=gen
                 )
-                epoch_loss = epoch_nll = epoch_kl = 0.0
-                n_batches = 0
-                for batch_X, batch_y in loader:
-                    opt.zero_grad()
-                    dist = self(batch_X)
-                    nll = -dist.log_prob(batch_y).mean()
-                    kl = collect_kl(self)
-                    loss = nll + kl
-                    loss.backward()
-                    opt.step()
-                    epoch_loss += float(loss.detach())
-                    epoch_nll += float(nll.detach())
-                    epoch_kl += float(kl.detach())
-                    n_batches += 1
-                # Record per-epoch mean across batches.
-                history["loss"].append(epoch_loss / n_batches)
-                history["nll"].append(epoch_nll / n_batches)
-                history["kl"].append(epoch_kl / n_batches)
             else:
+                batches = [(X, y)]
+
+            epoch_loss = epoch_nll = epoch_kl = 0.0
+            n_batches = 0
+            for batch_X, batch_y in batches:
                 opt.zero_grad()
-                dist = self(X)
-                nll = -dist.log_prob(y).mean()
-                kl = collect_kl(self)
-                loss = nll + kl
+                loss, nll, kl = self._loss_components(batch_X, batch_y)
                 loss.backward()
                 opt.step()
-
-                history["loss"].append(float(loss.detach()))
-                history["nll"].append(float(nll.detach()))
-                history["kl"].append(float(kl.detach()))
+                epoch_loss += float(loss.detach())
+                epoch_nll += float(nll.detach())
+                epoch_kl += float(kl.detach())
+                n_batches += 1
+            # Record per-epoch mean across batches.
+            history["loss"].append(epoch_loss / n_batches)
+            history["nll"].append(epoch_nll / n_batches)
+            history["kl"].append(epoch_kl / n_batches)
 
         self.eval()
         return history

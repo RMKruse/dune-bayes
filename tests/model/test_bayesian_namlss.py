@@ -112,10 +112,9 @@ def test_loss_exceeds_nll(single_feature_model, X_single, y):
 
     KL > 0 is the load-bearing claim from spike_kl_propagation.py [D].
     """
-    loss_fn = single_feature_model.Loss
     dist = single_feature_model(X_single)
     nll = -dist.log_prob(y).mean().item()
-    total = loss_fn(X_single, y).item()
+    total = single_feature_model.loss(X_single, y).item()
     # total must exceed nll because KL/N > 0
     assert total > nll
 
@@ -147,17 +146,17 @@ def test_multi_feature_kl_exceeds_single(X_single, X_multi, y, family):
     assert collect_kl(m2).item() > collect_kl(m1).item()
 
 
-# ── 4. model.Loss callable — AC2 ─────────────────────────────────────────────
+# ── 4. model.loss callable — AC2 ─────────────────────────────────────────────
 
 
-def test_loss_property_callable(single_feature_model):
-    """model.Loss is a callable."""
-    assert callable(single_feature_model.Loss)
+def test_loss_callable(single_feature_model):
+    """model.loss is a callable."""
+    assert callable(single_feature_model.loss)
 
 
 def test_loss_is_scalar(single_feature_model, X_single, y):
-    """model.Loss returns a scalar tensor with gradient."""
-    loss = single_feature_model.Loss(X_single, y)
+    """model.loss returns a scalar tensor with gradient."""
+    loss = single_feature_model.loss(X_single, y)
     assert loss.shape == ()
     assert loss.requires_grad
 

@@ -219,7 +219,7 @@ def elbo(
     model.eval()
     try:
         with torch.no_grad():
-            loss = model.Loss(X, y)
+            loss = model.loss(X, y)
         return float(-loss)
     finally:
         if was_training:
