@@ -13,10 +13,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers.variational_dense import _RHO_INIT, VariationalDense
+from neural_bamlss.layers.base import _RHO_INIT, VariationalLayer, gaussian_kl
 
 
-class BayesianIntercept(nn.Module):
+class BayesianIntercept(VariationalLayer):
     """Variational intercept with a wide prior, independent of per-feature prior_scale.
 
     Args:
@@ -38,12 +38,11 @@ class BayesianIntercept(nn.Module):
         mode: str = "variational",
         validate_args: bool = False,
     ) -> None:
-        super().__init__()
+        super().__init__(kl_divisor=kl_divisor)
         if mode not in ("variational", "point"):
             raise ValueError(f"unknown mode {mode!r}; choose 'variational' or 'point'")
         self.units = int(units)
         self.prior_scale = float(prior_scale)
-        self.kl_divisor = float(kl_divisor)
         self.mode = mode
         self.validate_args = bool(validate_args)
 
@@ -53,15 +52,11 @@ class BayesianIntercept(nn.Module):
         else:
             self.register_parameter("rho", None)
 
-        self.register_buffer("kl_beta", torch.tensor(1.0))
-        self.kl: torch.Tensor = torch.zeros(())
-
     def forward(self) -> torch.Tensor:
         if self.mode == "variational":
             scale = F.softplus(self.rho)
             sample = self.loc + scale * torch.randn_like(self.loc)
-            kl = VariationalDense._gaussian_kl(self.loc, scale, self.prior_scale)
-            self.kl = self.kl_beta * kl / self.kl_divisor
+            self._stash_kl(gaussian_kl(self.loc, scale, self.prior_scale))
         else:
             sample = self.loc
             self.kl = torch.zeros(())

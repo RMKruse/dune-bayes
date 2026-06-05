@@ -30,8 +30,7 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from neural_bamlss.layers import collect_kl
-from neural_bamlss.layers.variational_dense import VariationalDense, set_kl_beta
+from neural_bamlss.layers import VariationalDense, collect_kl, set_kl_beta
 
 
 def _has_bayesian_nets(formula: dict[str, nn.Module]) -> bool:

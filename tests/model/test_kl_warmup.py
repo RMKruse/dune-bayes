@@ -50,8 +50,7 @@ def X_y():
 
 def _full_kl_reference(model, X):
     """Return the KL produced by a single forward pass with β=1 (no warm-up scaling)."""
-    from neural_bamlss.layers import collect_kl
-    from neural_bamlss.layers.variational_dense import set_kl_beta
+    from neural_bamlss.layers import collect_kl, set_kl_beta
 
     set_kl_beta(model, 1.0)
     model(X)
