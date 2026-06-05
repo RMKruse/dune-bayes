@@ -5,7 +5,7 @@ Converts a MixtureSameFamily posterior predictive into a full predictive band
 tail quantiles per observation.
 
 Distinct from effect_ribbon.py (issue 0006), which is epistemic-only and
-operates on per-feature EffectSampler draws. Here aleatoric uncertainty is a
+operates on per-feature sample_effects draws. Here aleatoric uncertainty is a
 response-level property and is deliberately not attributed to individual features.
 """
 
@@ -33,7 +33,7 @@ def predictive_quantiles(
 
     Args:
         predictive: MixtureSameFamily with batch_shape (n,), as returned by
-            BayesianNAMLSS.sample_posterior_predictive or LogLikSampler.
+            BayesianNAMLSS.sample_posterior_predictive or draw_predictive.
         credible_interval: Width of the predictive band, e.g. 0.90 for 90%.
         n_samples: Number of Monte-Carlo draws used to estimate quantiles.
             Default 2000 balances accuracy and speed.

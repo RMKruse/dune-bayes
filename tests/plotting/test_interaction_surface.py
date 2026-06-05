@@ -3,7 +3,7 @@
 Acceptance criteria:
   - BayesianMLP(x1):BayesianMLP(x2) builds as a single joint net over both
     inputs — verified here as BayesianMLP(in_features=2) accepting (batch, 2).
-  - EffectSampler handles the interaction term as-is.
+  - sample_effects handles the interaction term as-is.
   - Interaction renders as a posterior-mean surface + epistemic-SD surface.
 
 Four reference-test archetypes (CLAUDE.md):
@@ -58,29 +58,28 @@ def test_joint_bayesian_mlp_shape():
     assert out.shape == (N, P), f"expected ({N}, {P}), got {out.shape}"
 
 
-# ── 2: EffectSampler handles joint net as-is — shape test ────────────────────
+# ── 2: sample_effects handles joint net as-is — shape test ───────────────────
 
 
 def test_effect_sampler_joint_net():
-    """EffectSampler with a joint-net key returns [T, n, param_count].
+    """sample_effects with a joint-net key returns [T, n, param_count].
 
     The net receives a (n, 2) input tensor (the concatenated interaction
-    features); EffectSampler is agnostic to in_features.
+    features); sample_effects is agnostic to in_features.
     """
     from neural_bamlss.families.normal import NormalFamily
     from neural_bamlss.model import BayesianNAMLSS
-    from neural_bamlss.sampling.effect_sampler import EffectSampler
+    from neural_bamlss.sampling.effect_sampler import sample_effects
     from neural_bamlss.shapes.bayesian_mlp import BayesianMLP
 
     net = BayesianMLP(in_features=2, param_count=P, hidden_dims=[8], validate_args=True)
     model = BayesianNAMLSS(formula={"x1x2": net}, family=NormalFamily())
-    sampler = EffectSampler()
 
     # data["x1x2"] is shape (N, 2) — the stacked interaction inputs.
     data = {"x1x2": torch.randn(N, 2)}
-    samples = sampler(model, data, T=T)
+    samples = sample_effects(model, data, T=T)
 
-    assert "x1x2" in samples, "expected 'x1x2' key in EffectSampler output"
+    assert "x1x2" in samples, "expected 'x1x2' key in sample_effects output"
     assert samples["x1x2"].shape == (T, N, P), (
         f"expected ({T}, {N}, {P}), got {samples['x1x2'].shape}"
     )

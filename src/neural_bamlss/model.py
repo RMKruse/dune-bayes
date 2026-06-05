@@ -19,7 +19,7 @@ Design:
   - model.loss(X_dict, y): scalar ELBO loss (NLL + KL/N).
   - fit(): lightweight training loop built on the same loss; returns a history dict.
   - sample_posterior_predictive(X, T): MixtureSameFamily posterior predictive
-    backed by LogLikSampler (issue 0007, ADR-0003).
+    backed by draw_predictive (issue 0007, ADR-0003, GitHub #68).
 """
 
 from __future__ import annotations
@@ -146,7 +146,7 @@ class BayesianNAMLSS(nn.Module):
         """Assemble the summed predictor from per-feature contributions.
 
         Single owner of the "inputs → summed predictor" assembly (issue 0060):
-        forward() and LogLikSampler both delegate here, so interaction-key
+        forward() and draw_predictive both delegate here, so interaction-key
         handling and feature dropout cannot drift between the training and
         sampling paths.
 
@@ -345,16 +345,13 @@ class BayesianNAMLSS(nn.Module):
             T: Number of posterior weight draws. Defaults to 200 (T_predict).
 
         Returns:
-            MixtureSameFamily with batch_shape (n,), backed by LogLikSampler.
+            MixtureSameFamily with batch_shape (n,), backed by draw_predictive.
         """
-        from neural_bamlss.sampling.log_lik_sampler import LogLikSampler
+        from neural_bamlss.sampling.log_lik_sampler import draw_predictive
 
-        # Dummy y of zeros — only summed_samples and predictive are used here.
-        # pointwise_loglik requires y; call LogLikSampler directly for WAIC/LOO.
-        n = next(iter(X.values())).shape[0]
-        y_dummy = torch.zeros(n)
-        result = LogLikSampler()(self, X, y_dummy, T=T)
-        return result.predictive
+        # Drawing needs no response (GitHub #68): scoring y is a separate job
+        # (pointwise_log_lik) composed by the compare module for WAIC/LOO.
+        return draw_predictive(self, X, T=T).predictive
 
     # ── save / load ───────────────────────────────────────────────────────────
 

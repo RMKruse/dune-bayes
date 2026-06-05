@@ -8,7 +8,7 @@ A 1D ribbon (effect_ribbon.py) does not generalize to two-feature interactions;
 these surfaces are the 2D equivalent (ADR-0005).
 
 Both surfaces use matplotlib.tri.tricontourf, which handles the irregular
-(x1, x2) scatter that EffectSampler returns without requiring a regular grid.
+(x1, x2) scatter that sample_effects returns without requiring a regular grid.
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ def surface_stats(
     """Compute posterior mean and epistemic SD from T weight draws.
 
     Args:
-        samples: Tensor[T, n, param_count] from EffectSampler for an
+        samples: Tensor[T, n, param_count] from sample_effects for an
             interaction feature (in_features=2 BayesianMLP).
 
     Returns:
@@ -53,7 +53,7 @@ def plot_interaction_surface(
     """Plot posterior-mean surface and epistemic-SD surface for an interaction.
 
     Args:
-        samples: Tensor[T, n, param_count] from EffectSampler for an
+        samples: Tensor[T, n, param_count] from sample_effects for an
             interaction feature.
         x1_values: Array[n] of first-feature values (x-axis).
         x2_values: Array[n] of second-feature values (y-axis).

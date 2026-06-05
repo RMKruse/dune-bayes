@@ -1,4 +1,4 @@
-"""Tests for EffectSampler workhorse (issue 0005 / GitHub #6).
+"""Tests for sample_effects workhorse (issue 0005 / GitHub #6, #68).
 
 Four reference-test archetypes (CLAUDE.md):
   - Shape:         output is {feature_name: Tensor[T, n, param_count]}.
@@ -14,7 +14,7 @@ import torch
 
 from neural_bamlss.families import NormalFamily
 from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.sampling import EffectSampler
+from neural_bamlss.sampling import T_PREDICT, sample_effects
 from neural_bamlss.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
@@ -68,9 +68,8 @@ def data_multi():
 
 def test_output_shape_single_feature(single_model, data_single, family):
     """samples[name] is a float32 Tensor of shape (T, n, param_count)."""
-    sampler = EffectSampler()
     T = 10
-    samples = sampler(single_model, data_single, T=T)
+    samples = sample_effects(single_model, data_single, T=T)
     assert "x1" in samples
     contrib = samples["x1"]
     assert contrib.shape == (T, N_OBS, family.param_count)
@@ -82,8 +81,7 @@ def test_output_shape_single_feature(single_model, data_single, family):
 
 def test_all_feature_names_returned(multi_model, data_multi, family):
     """Every feature name in model.feature_names appears in the output dict."""
-    sampler = EffectSampler()
-    samples = sampler(multi_model, data_multi, T=10)
+    samples = sample_effects(multi_model, data_multi, T=10)
     assert set(samples.keys()) == {"x1", "x2"}
     for name in ("x1", "x2"):
         assert samples[name].shape == (10, N_OBS, family.param_count)
@@ -92,15 +90,14 @@ def test_all_feature_names_returned(multi_model, data_multi, family):
 # ── 3: Default T = 200 ────────────────────────────────────────────────────────
 
 
-def test_t_predict_class_attribute():
-    """EffectSampler.T_predict is the module-level constant 200."""
-    assert EffectSampler.T_predict == 200
+def test_t_predict_constant():
+    """T_PREDICT is 200 — the default posterior-draw count (CONTEXT.md)."""
+    assert T_PREDICT == 200
 
 
 def test_default_t_is_200(single_model, data_single):
-    """Calling sampler without T uses T_predict=200."""
-    sampler = EffectSampler()
-    samples = sampler(single_model, data_single)
+    """Calling sample_effects without T uses T_PREDICT=200."""
+    samples = sample_effects(single_model, data_single)
     assert samples["x1"].shape[0] == 200
 
 
@@ -109,9 +106,8 @@ def test_default_t_is_200(single_model, data_single):
 
 def test_t_override(single_model, data_single):
     """Passing T overrides the default."""
-    sampler = EffectSampler()
     for T in (1, 50, 500):
-        samples = sampler(single_model, data_single, T=T)
+        samples = sample_effects(single_model, data_single, T=T)
         got = samples["x1"].shape[0]
         assert got == T, f"Expected T={T}, got {got}"
 
@@ -121,22 +117,19 @@ def test_t_override(single_model, data_single):
 
 def test_pure_function_preserves_training_mode(single_model, data_single):
     """Training mode is restored after sampling, regardless of initial mode."""
-    sampler = EffectSampler()
-
     single_model.train()
-    sampler(single_model, data_single, T=5)
+    sample_effects(single_model, data_single, T=5)
     assert single_model.training, "training mode not restored after sampling"
 
     single_model.eval()
-    sampler(single_model, data_single, T=5)
+    sample_effects(single_model, data_single, T=5)
     assert not single_model.training, "eval mode not restored after sampling"
 
 
 def test_pure_function_preserves_parameters(single_model, data_single):
     """Posterior parameters (loc, rho) are identical before and after sampling."""
-    sampler = EffectSampler()
     params_before = {k: v.clone() for k, v in single_model.named_parameters()}
-    sampler(single_model, data_single, T=20)
+    sample_effects(single_model, data_single, T=20)
     for name, val in single_model.named_parameters():
         assert torch.equal(params_before[name], val), f"parameter {name!r} mutated"
 
@@ -155,11 +148,13 @@ def test_sem_decreases_with_t(single_model, data_single):
     margin, fixed seed for reproducibility within this model object.
     """
     torch.manual_seed(0)
-    sampler = EffectSampler()
-
     T_small, T_large = 50, 1000
-    s_small = sampler(single_model, data_single, T=T_small)["x1"]  # [T_small, n, p]
-    s_large = sampler(single_model, data_single, T=T_large)["x1"]  # [T_large, n, p]
+    s_small = sample_effects(single_model, data_single, T=T_small)[
+        "x1"
+    ]  # [T_small, n, p]
+    s_large = sample_effects(single_model, data_single, T=T_large)[
+        "x1"
+    ]  # [T_large, n, p]
 
     sem_small = s_small.std(dim=0).mean() / math.sqrt(T_small)
     sem_large = s_large.std(dim=0).mean() / math.sqrt(T_large)
@@ -180,8 +175,9 @@ def test_centering_produces_zero_mean_curves(single_model, data_single):
     atol=1e-6: float32 arithmetic; centering is a single subtraction, so error
     is at floating-point epsilon, not MC noise.
     """
-    sampler = EffectSampler()
-    samples = sampler(single_model, data_single, T=20)["x1"]  # [T, n, param_count]
+    samples = sample_effects(single_model, data_single, T=20)[
+        "x1"
+    ]  # [T, n, param_count]
 
     # Center each of the T curves over the n data points.
     centered = samples - samples.mean(dim=1, keepdim=True)  # [T, n, param_count]
@@ -199,8 +195,8 @@ def test_centering_produces_zero_mean_curves(single_model, data_single):
 def test_interaction_term_takes_preconcatenated_grid(family):
     """The value for an interaction key is the pre-concatenated (n, 2) tensor.
 
-    Unlike forward()/LogLikSampler — which take per-feature entries and
-    concatenate internally — EffectSampler callers supply per-term grids, so
+    Unlike forward()/draw_predictive — which take per-feature entries and
+    concatenate internally — sample_effects callers supply per-term grids, so
     the "x1:x2" entry is the already-concatenated tensor (issue 0060).
     """
     formula = {
@@ -213,8 +209,7 @@ def test_interaction_term_takes_preconcatenated_grid(family):
     g = torch.Generator().manual_seed(5)
     grid = {"x1:x2": torch.randn(N_OBS, 2 * IN, generator=g)}
 
-    sampler = EffectSampler()
     T = 10
-    samples = sampler(model, grid, T=T)
+    samples = sample_effects(model, grid, T=T)
     assert set(samples.keys()) == {"x1:x2"}
     assert samples["x1:x2"].shape == (T, N_OBS, family.param_count)

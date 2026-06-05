@@ -1,8 +1,9 @@
 """Model comparison: WAIC / LOO / compare — arviz-backed (issue 0009 / GitHub #10).
 
 Design:
-  - to_inference_data() packages LogLikSampler output into an arviz DataTree
-    (arviz 1.x InferenceData) with the (chain, draw, obs) shape convention.
+  - to_inference_data() composes draw_predictive + pointwise_log_lik (#68)
+    into an arviz DataTree (arviz 1.x InferenceData) with the
+    (chain, draw, obs) shape convention.
   - waic() implements WAIC2 from first principles (Vehtari et al. 2017, eq. 12)
     because arviz 1.x dropped az.waic; uses logsumexp for numerical stability.
   - loo() delegates to az.loo (PSIS-LOO) and surfaces Pareto-k warnings.
@@ -22,7 +23,11 @@ import numpy as np
 import torch
 
 from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.sampling.log_lik_sampler import T_EVAL, LogLikSampler
+from neural_bamlss.sampling.log_lik_sampler import (
+    T_EVAL,
+    draw_predictive,
+    pointwise_log_lik,
+)
 
 
 @dataclass
@@ -54,7 +59,8 @@ def to_inference_data(
 ) -> Any:
     """Convert model + data to an arviz DataTree with pointwise log-likelihood.
 
-    Runs T posterior draws via LogLikSampler and packages the resulting
+    Runs T posterior draws via draw_predictive, scores y with
+    pointwise_log_lik, and packages the resulting
     (T, n) float64 log-likelihood matrix into arviz's (chain, draw, obs) layout.
     Suitable as input to az.loo / az.compare.
 
@@ -69,10 +75,12 @@ def to_inference_data(
         xr.DataTree with 'posterior' (dummy) and 'log_likelihood' groups.
         log_likelihood[var_name] has shape (chain=1, draw=T, obs=n) float64.
     """
-    sampler = LogLikSampler()
-    result = sampler(model, X, y, T=T)
+    # Draw once, score once (GitHub #68): the predictive draw needs no y;
+    # scoring consumes the already-drawn summed_samples.
+    draws = draw_predictive(model, X, T=T)
+    ll = pointwise_log_lik(model, draws.summed_samples, y)
     # (T, n) → (1, T, n) for arviz (chain, draw, obs) convention.
-    ll_np = result.pointwise_loglik.numpy()[np.newaxis, ...]  # (1, T, n) float64
+    ll_np = ll.numpy()[np.newaxis, ...]  # (1, T, n) float64
     # az.loo requires a posterior group to compute the relative MCMC efficiency.
     return az.from_dict(
         {
@@ -128,9 +136,8 @@ def waic(
     Returns:
         WaicData with elpd (higher is better), effective p, SE, and metadata.
     """
-    sampler = LogLikSampler()
-    result = sampler(model, X, y, T=T)
-    return _waic_from_loglik(result.pointwise_loglik)
+    draws = draw_predictive(model, X, T=T)
+    return _waic_from_loglik(pointwise_log_lik(model, draws.summed_samples, y))
 
 
 def loo(

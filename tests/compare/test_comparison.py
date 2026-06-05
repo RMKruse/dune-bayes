@@ -26,7 +26,7 @@ N_OBS = 30
 IN = 1
 
 # ── deterministic fixture ─────────────────────────────────────────────────────
-# A plain nn.Linear with fixed weights: every LogLikSampler draw is identical.
+# A plain nn.Linear with fixed weights: every draw_predictive draw is identical.
 # This gives a closed-form WAIC/LOO reference.
 
 
@@ -157,7 +157,7 @@ def test_loo_returns_elpd_data(bay_model, bay_data):
 def test_loo_elpd_matches_arviz_reference(bay_model, bay_data):
     """loo() matches az.loo on the same DataTree when given the same seed.
 
-    Seeding torch before each call makes LogLikSampler produce identical weight
+    Seeding torch before each call makes draw_predictive produce identical weight
     samples → identical pointwise_loglik → identical DataTrees → equal elpd.
 
     Tolerance: float64 arithmetic → rel=1e-6 is well within machine precision.

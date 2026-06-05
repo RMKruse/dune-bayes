@@ -1,6 +1,6 @@
 """Centered epistemic effect ribbons (issue 0006 / GitHub #7).
 
-Converts EffectSampler draws [T, n, param_count] into credible ribbons by:
+Converts sample_effects draws [T, n, param_count] into credible ribbons by:
   1. Optionally mean-centering each of the T draws over the n data points
      (isolates shape uncertainty from overall level — CONTEXT.md "Effect plot").
   2. Computing lo/mid/hi quantiles across T.
@@ -26,7 +26,7 @@ def ribbon_quantiles(
     """Compute credible ribbon quantiles from posterior contribution draws.
 
     Args:
-        samples: Tensor[T, n, param_count] from EffectSampler for one feature.
+        samples: Tensor[T, n, param_count] from sample_effects for one feature.
         credible_interval: Width of the credible band, e.g. 0.90 for 90%.
         center: If True, mean-center each draw over n before quantile
             computation. Isolates shape uncertainty from the overall level
@@ -66,7 +66,7 @@ def plot_effect_ribbon(
     """Plot centered epistemic credible ribbon for one feature.
 
     Args:
-        samples: Tensor[T, n, param_count] from EffectSampler for one feature.
+        samples: Tensor[T, n, param_count] from sample_effects for one feature.
         x_values: Array[n] of x-axis values (sorted for a smooth ribbon).
         credible_interval: Width of the credible band. Default 0.90.
         center: Mean-center each draw before computing quantiles. Default True.
@@ -92,7 +92,7 @@ def plot_effect_ribbon(
     else:
         x = np.asarray(x_values)
 
-    # Sort along x for a smooth visual (EffectSampler gives unordered n rows).
+    # Sort along x for a smooth visual (sample_effects gives unordered n rows).
     order = np.argsort(x)
     x, lo, mid, hi = x[order], lo[order], mid[order], hi[order]
 
