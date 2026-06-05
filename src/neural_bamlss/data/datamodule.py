@@ -1,6 +1,6 @@
 """DataModule — tabular data → model-ready tensors + N.
 
-Issue 0022–0025 / GitHub #49–#52.
+Issue 0022–0026 / GitHub #49–#53.
 
 Walking skeleton of the data component: a DataFrame plus the response-column
 name becomes the per-feature tensor dict and target tensor the model already
@@ -9,7 +9,8 @@ hand-passed. Numeric preprocessing (issue 0023 / GitHub #50) is opt-in via
 ``numeric_scaling``: standardize by default, min-max per feature on request.
 Categorical encoding (issue 0024 / GitHub #51) is automatic: object/category
 dtype columns are integer-coded 0..K-1 as torch.long tensors for
-BayesianEmbedding.
+BayesianEmbedding.  Minibatching (issue 0026 / GitHub #53) is provided via
+``dataloader()``: a seedable DataLoader over (feature-dict, target) batches.
 """
 
 from __future__ import annotations
@@ -20,9 +21,33 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import torch
+import torch.utils.data
 
 # Single named epsilon constant (CLAUDE.md numerical rules — never bare divisions).
 _EPS_F32: float = 1e-6
+
+
+class _FeatureDictDataset(torch.utils.data.Dataset):
+    """torch.utils.data.Dataset over a feature dict + target tensor.
+
+    Each item is a (feature_dict_row, target_scalar) pair. The feature dict
+    preserves the same keys as DataModule.features; each value is a 1-D slice
+    along the first (observation) dimension.
+    """
+
+    def __init__(
+        self,
+        features: dict[str, torch.Tensor],
+        target: torch.Tensor,
+    ) -> None:
+        self._features = features
+        self._target = target
+
+    def __len__(self) -> int:
+        return int(self._target.shape[0])
+
+    def __getitem__(self, idx: int) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        return {k: v[idx] for k, v in self._features.items()}, self._target[idx]
 
 
 def _is_categorical(series: pd.Series) -> bool:
@@ -195,6 +220,40 @@ class DataModule:
     def num_levels(self) -> dict[str, int]:
         """Level count per categorical feature, for sizing BayesianEmbedding."""
         return {name: enc.num_levels for name, enc in self._encoders.items()}
+
+    def dataloader(
+        self,
+        batch_size: int,
+        shuffle: bool = True,
+        generator: torch.Generator | None = None,
+    ) -> torch.utils.data.DataLoader:
+        """Return a DataLoader that yields (feature-dict, target) minibatches.
+
+        The KL divisor must remain ``n_obs`` (full training-set size), not the
+        batch size. This method only produces the batches; the model's ``fit()``
+        is responsible for keeping ``kl_divisor`` fixed at N (issue 0026).
+
+        Args:
+            batch_size: Number of observations per batch.  The final batch may
+                be smaller than ``batch_size`` (``drop_last=False``).
+            shuffle: Whether to shuffle observations each epoch (default True).
+            generator: Optional seeded ``torch.Generator`` for reproducible
+                shuffling within one model object (consistent with the
+                one-model-object reproducibility rule in CLAUDE.md).
+
+        Returns:
+            A ``torch.utils.data.DataLoader`` whose items are
+            ``(feature_dict, target)`` tuples — the same structure as
+            ``self.features`` and ``self.target``, sliced along dim 0.
+        """
+        dataset = _FeatureDictDataset(self.features, self.target)
+        return torch.utils.data.DataLoader(
+            dataset,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            generator=generator,
+            drop_last=False,
+        )
 
     def transform(self, df: pd.DataFrame) -> dict[str, torch.Tensor]:
         """Apply fitted preprocessing to new data without refitting.
