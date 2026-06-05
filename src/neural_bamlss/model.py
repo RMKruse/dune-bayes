@@ -158,13 +158,23 @@ class BayesianNAMLSS(nn.Module):
             self.nets[name](self._get_input(X, name)) for name in self.feature_names
         ]
         # Sum contributions (additive model); stack → sum over feature dim.
-        summed = torch.stack(contribs, dim=0).sum(dim=0)  # (batch, param_count)
+        stacked = torch.stack(contribs, dim=0)  # (F, batch, param_count)
         if self.training and self.feature_dropout > 0.0:
-            # Feature-level dropout: zero entire feature contribution randomly.
+            # Feature-level dropout: zero entire feature contributions, then
+            # rescale by F / #survivors so the additive sum keeps its expected
+            # magnitude (inverted-dropout rescale by the *realized* survivor
+            # count, exact for the additive sum; clamp guards the all-dropped
+            # draw, which yields an all-zero prediction).
             mask = torch.bernoulli(
-                torch.full((len(contribs),), 1.0 - self.feature_dropout)
+                torch.full(
+                    (len(contribs), 1, 1),
+                    1.0 - self.feature_dropout,
+                    device=stacked.device,
+                    dtype=stacked.dtype,
+                )
             )
-            summed = summed * mask.sum() / max(mask.sum().item(), 1.0)
+            stacked = stacked * mask * len(contribs) / mask.sum().clamp(min=1.0)
+        summed = stacked.sum(dim=0)  # (batch, param_count)
         return self.family(summed)
 
     # ── loss ──────────────────────────────────────────────────────────────────
