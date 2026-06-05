@@ -55,7 +55,7 @@ formulas (a deterministic net is a degenerate zero-variance contributor). The
 deterministic `NAMLSS` stays untouched. v1 covers `BayesianNAMLSS`; Bayesian
 variants of NATTLSS/transformer-LSS come later.
 
-Training keeps the familiar **`compile(loss=model.Loss)` / `fit()`** surface:
+Training keeps the familiar **`compile(loss=model.loss)` / `fit()`** surface:
 KL/N is added automatically via `add_loss`, and the KL warm-up callback is
 auto-injected by a `fit()` override (on by default). New capabilities
 (`sample_posterior_predictive`, `waic`/`loo`/`compare`, banded `plot`) are
