@@ -194,6 +194,8 @@ class BayesianNAMLSS(nn.Module):
         epochs: int = 100,
         lr: float = 1e-3,
         warmup_epochs: int = 10,
+        batch_size: int | None = None,
+        seed: int | None = None,
         callbacks: list | None = None,
     ) -> dict[str, list[float]]:
         """Train the model on (X, y) using the ELBO loss.
@@ -202,14 +204,24 @@ class BayesianNAMLSS(nn.Module):
         over the first warmup_epochs epochs, guarding against posterior collapse.
         Set warmup_epochs=0 to disable.
 
+        When ``batch_size`` is given and ``X`` is a DataModule, training uses
+        minibatches from ``dm.dataloader()``.  The KL divisor stays at
+        ``n_obs`` (full training-set size) — never at ``batch_size`` — so the
+        ELBO estimate is unbiased (issue 0026).
+
         Args:
             X: Feature dict; each value is (n_obs, in_features). May instead
                 be a DataModule (issue 0022), in which case y is taken from it
                 and must not be passed.
             y: Target tensor of shape (n_obs,). None when X is a DataModule.
-            epochs: Number of full-data gradient steps.
+            epochs: Number of passes over the training data.
             lr: Adam learning rate.
             warmup_epochs: Epochs over which β ramps 0→1. 0 disables warm-up.
+            batch_size: Minibatch size. None (default) keeps full-batch training.
+                Requires X to be a DataModule.
+            seed: Integer seed for the DataLoader shuffle generator. Only used
+                when ``batch_size`` is set; controls batch ordering within
+                one model object (consistent with the reproducibility rule).
             callbacks: Optional list of callables with signature (epoch: int) → None,
                 called at the start of each epoch alongside the warm-up callback.
 
@@ -218,9 +230,10 @@ class BayesianNAMLSS(nn.Module):
         """
         from neural_bamlss.data import DataModule
 
+        data_module: DataModule | None = None
         if isinstance(X, DataModule):
-            data = X
-            X, y = data.features, data.target
+            data_module = X
+            X, y = data_module.features, data_module.target
         if y is None:
             raise TypeError("fit() requires y unless X is a DataModule")
         if self.n_obs is None:
@@ -238,22 +251,54 @@ class BayesianNAMLSS(nn.Module):
         if callbacks:
             _callbacks.extend(callbacks)
 
+        # Prepare the minibatch generator if requested (issue 0026).
+        # The generator is reset each epoch for reproducible intra-epoch order.
+        use_minibatch = batch_size is not None and data_module is not None
+
         self.train()
         for epoch in range(epochs):
             for cb in _callbacks:
                 cb(epoch)
 
-            opt.zero_grad()
-            dist = self(X)
-            nll = -dist.log_prob(y).mean()
-            kl = collect_kl(self)
-            loss = nll + kl
-            loss.backward()
-            opt.step()
+            if use_minibatch:
+                # Seed a fresh generator each epoch so the shuffle sequence is
+                # reproducible within one model object when seed is given.
+                gen: torch.Generator | None = None
+                if seed is not None:
+                    gen = torch.Generator().manual_seed(seed + epoch)
+                loader = data_module.dataloader(  # type: ignore[union-attr]
+                    batch_size=batch_size, generator=gen
+                )
+                epoch_loss = epoch_nll = epoch_kl = 0.0
+                n_batches = 0
+                for batch_X, batch_y in loader:
+                    opt.zero_grad()
+                    dist = self(batch_X)
+                    nll = -dist.log_prob(batch_y).mean()
+                    kl = collect_kl(self)
+                    loss = nll + kl
+                    loss.backward()
+                    opt.step()
+                    epoch_loss += float(loss.detach())
+                    epoch_nll += float(nll.detach())
+                    epoch_kl += float(kl.detach())
+                    n_batches += 1
+                # Record per-epoch mean across batches.
+                history["loss"].append(epoch_loss / n_batches)
+                history["nll"].append(epoch_nll / n_batches)
+                history["kl"].append(epoch_kl / n_batches)
+            else:
+                opt.zero_grad()
+                dist = self(X)
+                nll = -dist.log_prob(y).mean()
+                kl = collect_kl(self)
+                loss = nll + kl
+                loss.backward()
+                opt.step()
 
-            history["loss"].append(float(loss.detach()))
-            history["nll"].append(float(nll.detach()))
-            history["kl"].append(float(kl.detach()))
+                history["loss"].append(float(loss.detach()))
+                history["nll"].append(float(nll.detach()))
+                history["kl"].append(float(kl.detach()))
 
         self.eval()
         return history
