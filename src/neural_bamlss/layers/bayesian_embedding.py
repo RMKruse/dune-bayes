@@ -15,14 +15,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers.variational_dense import _RHO_INIT
+from neural_bamlss.layers.base import _RHO_INIT, VariationalLayer, gaussian_kl
 from neural_bamlss.priors.prior_scale import PriorScale
 
 # Small initialisation scale so the embedding table starts near zero.
 _LOC_INIT_STD = 0.01
 
 
-class BayesianEmbedding(nn.Module):
+class BayesianEmbedding(VariationalLayer):
     """Variational embedding table — Bayesian categorical first mapping.
 
     Embedding weights W[level, dim] carry a mean-field Gaussian posterior;
@@ -50,7 +50,7 @@ class BayesianEmbedding(nn.Module):
         mode: str = "variational",
         validate_args: bool = False,
     ) -> None:
-        super().__init__()
+        super().__init__(kl_divisor=kl_divisor)
         if mode not in ("variational", "point"):
             raise ValueError(f"unknown mode {mode!r}; choose 'variational' or 'point'")
 
@@ -59,7 +59,6 @@ class BayesianEmbedding(nn.Module):
         if prior_scale_handle is None:
             prior_scale_handle = PriorScale(mode="fixed", scale=1.0)
         self.prior_scale_handle = prior_scale_handle
-        self.kl_divisor = float(kl_divisor)
         self.mode = mode
         self.validate_args = bool(validate_args)
 
@@ -74,10 +73,6 @@ class BayesianEmbedding(nn.Module):
             )
         else:
             self.register_parameter("rho", None)
-
-        # Non-trainable warm-up factor β; driven by set_kl_beta().
-        self.register_buffer("kl_beta", torch.tensor(1.0))
-        self.kl: torch.Tensor = torch.zeros(())
 
     # ── forward ───────────────────────────────────────────────────────────────
 
@@ -96,21 +91,17 @@ class BayesianEmbedding(nn.Module):
             sampled = self.loc + scale * torch.randn_like(self.loc)
             out = sampled[idx]
 
-            # Shared prior scale s from the per-feature PriorScale handle.
+            # Shared prior scale s from the per-feature PriorScale handle —
+            # passed as a tensor so its gradient path stays alive.
             s = self.prior_scale_handle()  # positive scalar tensor
 
             # KL[N(loc, scale²) ‖ N(0, s²)], summed over all (level, dim) pairs.
-            embedding_kl = torch.sum(
-                torch.log(s)
-                - torch.log(scale)
-                + (scale.pow(2) + self.loc.pow(2)) / (2.0 * s.pow(2))
-                - 0.5
-            )
+            embedding_kl = gaussian_kl(self.loc, scale, s)
 
             # Hyperprior KL from PriorScale (zero unless hierarchical mode).
             ps_kl = self.prior_scale_handle.kl()
 
-            self.kl = self.kl_beta * (embedding_kl + ps_kl) / self.kl_divisor
+            self._stash_kl(embedding_kl + ps_kl)
         else:
             out = self.loc[idx]
             self.kl = torch.zeros(())
