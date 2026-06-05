@@ -18,6 +18,7 @@ from neural_bamlss.compare import compare, elbo, loo, to_inference_data, waic
 from neural_bamlss.families import NormalFamily
 from neural_bamlss.model import BayesianNAMLSS
 from neural_bamlss.shapes import BayesianMLP
+from neural_bamlss.utils import seed_everything
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -49,7 +50,13 @@ def det_data():
 
 @pytest.fixture
 def bay_model():
-    """BayesianMLP-backed model for structural / warning tests."""
+    """BayesianMLP-backed model for structural / warning tests.
+
+    Seeded so init weights AND posterior draws are deterministic per test —
+    the unseeded global stream occasionally produced degenerate loo tails
+    ("All tail values are the same", GitHub #62).
+    """
+    seed_everything(0)
     family = NormalFamily(validate_args=True)
     formula = {"x": BayesianMLP(IN, 2, [8], N_OBS)}
     return BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
