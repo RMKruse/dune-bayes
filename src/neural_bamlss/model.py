@@ -143,8 +143,13 @@ class BayesianNAMLSS(nn.Module):
             return torch.cat([X[f] for f in name.split(":")], dim=-1)
         return X[name]
 
-    def forward(self, X: dict[str, torch.Tensor]) -> torch.distributions.Distribution:
-        """Single stochastic forward pass.
+    def predict_params(self, X: dict[str, torch.Tensor]) -> torch.Tensor:
+        """Assemble the summed predictor from per-feature contributions.
+
+        Single owner of the "inputs → summed predictor" assembly (issue 0060):
+        forward() and LogLikSampler both delegate here, so interaction-key
+        handling and feature dropout cannot drift between the training and
+        sampling paths.
 
         Args:
             X: Dict mapping feature name → tensor of shape (batch, in_features).
@@ -152,7 +157,8 @@ class BayesianNAMLSS(nn.Module):
                 ``X["x1"]`` and ``X["x2"]`` along the feature dimension.
 
         Returns:
-            A torch.distributions.Distribution with batch_shape (batch,).
+            Summed predictor tensor of shape (batch, param_count). Stochastic
+            when Bayesian nets are present (one reparameterization draw).
         """
         contribs = [
             self.nets[name](self._get_input(X, name)) for name in self.feature_names
@@ -174,8 +180,20 @@ class BayesianNAMLSS(nn.Module):
                 )
             )
             stacked = stacked * mask * len(contribs) / mask.sum().clamp(min=1.0)
-        summed = stacked.sum(dim=0)  # (batch, param_count)
-        return self.family(summed)
+        return stacked.sum(dim=0)  # (batch, param_count)
+
+    def forward(self, X: dict[str, torch.Tensor]) -> torch.distributions.Distribution:
+        """Single stochastic forward pass.
+
+        Args:
+            X: Dict mapping feature name → tensor of shape (batch, in_features).
+                Interaction terms (keyed ``"x1:x2"``) are fed by concatenating
+                ``X["x1"]`` and ``X["x2"]`` along the feature dimension.
+
+        Returns:
+            A torch.distributions.Distribution with batch_shape (batch,).
+        """
+        return self.family(self.predict_params(X))
 
     # ── loss ──────────────────────────────────────────────────────────────────
 

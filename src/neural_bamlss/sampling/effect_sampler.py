@@ -49,7 +49,11 @@ class EffectSampler:
             model: Fitted BayesianNAMLSS instance. Its posterior is defined by
                 the variational parameters (loc, rho) of every VariationalDense.
             data: Feature dict {name: Tensor[n, in_features]}, one entry per
-                feature in model.feature_names.
+                feature in model.feature_names.  Unlike forward()/LogLikSampler,
+                interaction terms are keyed by the full term name ("x1:x2") and
+                their value is the **pre-concatenated** (n, 2) grid tensor —
+                callers supply per-term grids, so no concatenation happens here
+                (issue 0060).
             T: Number of independent posterior weight draws. Defaults to
                 T_predict (200).
 
