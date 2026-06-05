@@ -323,3 +323,51 @@ def test_feature_dropout_explicit_override_on_deterministic(family):
         feature_dropout=0.0,
     )
     assert model.feature_dropout == pytest.approx(0.0)
+
+
+def _constant_contribution_model(family, feature_dropout):
+    """Two deterministic nets with known contributions: 1.0 and 2.0 at x=1.
+
+    With per-feature dropout (rescale F / #survivors) the train-mode loc can
+    only take values in {0, 2, 3, 4}: both kept → 3, only x1 → 1·2/1 = 2,
+    only x2 → 2·2/1 = 4, both dropped → 0.  The pre-fix bug (mask never
+    applied to individual contributions) could only ever produce {0, 3}.
+    """
+    net1 = nn.Linear(IN, family.param_count, bias=False)
+    net2 = nn.Linear(IN, family.param_count, bias=False)
+    with torch.no_grad():
+        net1.weight.fill_(1.0)
+        net2.weight.fill_(2.0)
+    return BayesianNAMLSS(
+        formula={"x1": net1, "x2": net2},
+        family=family,
+        n_obs=N_OBS,
+        feature_dropout=feature_dropout,
+    )
+
+
+def test_feature_dropout_drops_individual_contributions(family):
+    """Train-mode dropout zeroes single feature contributions (AC5).
+
+    Asserts the set of realized locs over many draws, not a single draw
+    (testing rule: never assert one stochastic draw).  200 draws at p = 0.5
+    miss a 1/4-probability outcome with prob (3/4)^200 ≈ 1e-25, so requiring
+    all four outcomes is sound under the fixed seed.
+    """
+    model = _constant_contribution_model(family, feature_dropout=0.5)
+    model.train()
+    X = {"x1": torch.ones(1, IN), "x2": torch.ones(1, IN)}
+    torch.manual_seed(0)
+    locs = {round(model(X).mean.item(), 4) for _ in range(200)}
+    # Exact values up to float32 rounding — the rescale arithmetic is exact
+    # for these integer contributions.
+    assert locs == {0.0, 2.0, 3.0, 4.0}
+
+
+def test_feature_dropout_inactive_in_eval_mode(family):
+    """eval() disables feature dropout: loc is the deterministic full sum."""
+    model = _constant_contribution_model(family, feature_dropout=0.5)
+    model.eval()
+    X = {"x1": torch.ones(1, IN), "x2": torch.ones(1, IN)}
+    locs = [model(X).mean.item() for _ in range(20)]
+    assert locs == pytest.approx([3.0] * 20)
