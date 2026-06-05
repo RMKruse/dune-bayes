@@ -1,4 +1,6 @@
-"""DataModule — tabular data → model-ready tensors + N (issue 0022 / GitHub #49).
+"""DataModule — tabular data → model-ready tensors + N.
+
+Issue 0022–0025 / GitHub #49–#52.
 
 Walking skeleton of the data component: a DataFrame plus the response-column
 name becomes the per-feature tensor dict and target tensor the model already
@@ -12,7 +14,8 @@ BayesianEmbedding.
 
 from __future__ import annotations
 
-from typing import Literal
+from pathlib import Path
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -262,3 +265,91 @@ class DataModule:
             self._scalers[feature_name].inverse_transform(arr),
             dtype=torch.float32,
         )
+
+    # ── serialization (issue 0025 / GitHub #52) ───────────────────────────────
+
+    def get_state(self) -> dict[str, Any]:
+        """Return a closure-free dict of all fitted preprocessing state.
+
+        The dict contains only plain Python scalars, strings, and lists —
+        no class instances — so it survives ``torch.save`` / ``torch.load``
+        without being coupled to the current class definitions.
+
+        Returns:
+            Dict with keys: ``response``, ``n_obs``, ``scalers``
+            (per-feature ``{method, loc, scale}``), ``encoders``
+            (per-feature ``{categories: list[str]}``).
+        """
+        scalers_state = {
+            name: {"method": s.method, "loc": s._loc, "scale": s._scale}
+            for name, s in self._scalers.items()
+        }
+        encoders_state = {
+            name: {"categories": list(e._categories)}
+            for name, e in self._encoders.items()
+        }
+        return {
+            "response": self.response,
+            "n_obs": self.n_obs,
+            "scalers": scalers_state,
+            "encoders": encoders_state,
+        }
+
+    @classmethod
+    def from_state(cls, state: dict[str, Any]) -> "DataModule":
+        """Reconstruct a DataModule from a saved state dict without refitting.
+
+        Only the preprocessing state is restored.  ``features`` and
+        ``target`` tensors are **not** restored — use ``transform(df)`` on
+        fresh data instead of accessing ``dm.features`` directly.
+
+        Args:
+            state: Dict produced by ``get_state()``.
+
+        Returns:
+            A DataModule whose ``transform()`` is identical to the original.
+        """
+        # Bypass __init__ so we never touch a DataFrame.
+        obj = object.__new__(cls)
+        obj.response = state["response"]
+        obj.n_obs = state["n_obs"]
+        obj.features = {}
+        obj.target = torch.empty(0)
+
+        obj._scalers = {}
+        for name, s in state["scalers"].items():
+            scaler = _FeatureScaler(s["method"])
+            scaler._loc = s["loc"]
+            scaler._scale = s["scale"]
+            obj._scalers[name] = scaler
+
+        obj._encoders = {}
+        for name, e in state["encoders"].items():
+            enc = _CategoricalEncoder()
+            enc._categories = list(e["categories"])
+            enc._mapping = {cat: i for i, cat in enumerate(enc._categories)}
+            obj._encoders[name] = enc
+
+        return obj
+
+    def save_state(self, path: Path | str) -> None:
+        """Serialize fitted preprocessing state to ``path`` via ``torch.save``.
+
+        Args:
+            path: Destination file path (e.g. ``"dm_state.pt"``).
+        """
+        torch.save(self.get_state(), Path(path))
+
+    @classmethod
+    def load_state(cls, path: Path | str) -> "DataModule":
+        """Load a DataModule from a state file written by ``save_state()``.
+
+        Args:
+            path: Path to the state file.
+
+        Returns:
+            Reconstructed DataModule; identical transform behaviour to the
+            original.
+        """
+        state = torch.load(Path(path), weights_only=True)
+        return cls.from_state(state)
