@@ -371,3 +371,47 @@ def test_feature_dropout_inactive_in_eval_mode(family):
     X = {"x1": torch.ones(1, IN), "x2": torch.ones(1, IN)}
     locs = [model(X).mean.item() for _ in range(20)]
     assert locs == pytest.approx([3.0] * 20)
+
+
+# ── 8. predict_params — single owner of predictor assembly (issue 0060) ───────
+
+
+@pytest.fixture
+def interaction_model(family):
+    formula = {
+        "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+        "x1:x2": BayesianMLP(
+            2 * IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+        ),
+    }
+    return BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
+
+
+def test_predict_params_shape(multi_feature_model, X_multi, family):
+    """predict_params returns the summed predictor, shape (batch, param_count)."""
+    params = multi_feature_model.predict_params(X_multi)
+    assert params.shape == (BATCH, family.param_count)
+
+
+def test_predict_params_handles_interaction_key(interaction_model, X_multi, family):
+    """predict_params accepts the same X dict as forward for "x1:x2" terms."""
+    params = interaction_model.predict_params(X_multi)
+    assert params.shape == (BATCH, family.param_count)
+    assert torch.isfinite(params).all()
+
+
+def test_forward_is_family_of_predict_params(multi_feature_model, X_multi, family):
+    """forward(X) == family(predict_params(X)) under the same seed.
+
+    Reproducibility holds within one model object (CLAUDE.md seeding rule):
+    re-seeding before each call makes the reparameterization draws identical,
+    so the two paths must produce the same distribution parameters exactly.
+    """
+    model = multi_feature_model
+    model.eval()
+    torch.manual_seed(11)
+    dist_forward = model(X_multi)
+    torch.manual_seed(11)
+    dist_direct = family(model.predict_params(X_multi))
+    assert torch.equal(dist_forward.mean, dist_direct.mean)
+    assert torch.equal(dist_forward.stddev, dist_direct.stddev)

@@ -179,7 +179,7 @@ def test_law_of_total_variance(model, data_x, data_y):
         atol=0.05,
     ), (
         f"law of total variance violated: "
-        f"max|Δ|={( mixture_var.float() - loto_var.float()).abs().max():.4f}"
+        f"max|Δ|={(mixture_var.float() - loto_var.float()).abs().max():.4f}"
     )
 
 
@@ -200,3 +200,47 @@ def test_sample_posterior_predictive_returns_mixture(model, data_x):
 def test_t_eval_class_attribute():
     """LogLikSampler.T_eval is 1000 for information-criterion runs."""
     assert LogLikSampler.T_eval == 1000
+
+
+# ── 9: Interaction terms — sampler accepts the same X dict as forward ─────────
+# (issue 0060: predictor assembly is the model's concept; the sampler must not
+# re-implement it and drift on interaction keys.)
+
+
+@pytest.fixture
+def interaction_model(family):
+    formula = {
+        "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+        "x1:x2": BayesianMLP(
+            2 * IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+        ),
+    }
+    return BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
+
+
+@pytest.fixture
+def interaction_x():
+    g = torch.Generator().manual_seed(3)
+    return {
+        "x1": torch.randn(N_OBS, IN, generator=g),
+        "x2": torch.randn(N_OBS, IN, generator=g),
+    }
+
+
+def test_interaction_model_loglik_shapes_and_finite(
+    interaction_model, interaction_x, data_y, family
+):
+    """An "x1:x2" model works through the sampler on the same X dict as forward."""
+    sampler = LogLikSampler()
+    T = 5
+    result = sampler(interaction_model, interaction_x, data_y, T=T)
+    assert result.summed_samples.shape == (T, N_OBS, family.param_count)
+    assert result.pointwise_loglik.shape == (T, N_OBS)
+    assert torch.isfinite(result.pointwise_loglik).all()
+
+
+def test_interaction_model_posterior_predictive(interaction_model, interaction_x):
+    """sample_posterior_predictive works for interaction models (Goal 3 path)."""
+    predictive = interaction_model.sample_posterior_predictive(interaction_x, T=10)
+    assert isinstance(predictive, torch.distributions.MixtureSameFamily)
+    assert predictive.batch_shape == (N_OBS,)

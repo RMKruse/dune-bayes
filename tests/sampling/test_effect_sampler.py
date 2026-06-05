@@ -191,3 +191,30 @@ def test_centering_produces_zero_mean_curves(single_model, data_single):
     assert residual.max().item() < 1e-5, (  # float32 sum over n=32 points
         f"centering residual too large: {residual.max().item():.2e}"
     )
+
+
+# ── 8: Interaction-term contract — pre-concatenated grid (issue 0060) ─────────
+
+
+def test_interaction_term_takes_preconcatenated_grid(family):
+    """The value for an interaction key is the pre-concatenated (n, 2) tensor.
+
+    Unlike forward()/LogLikSampler — which take per-feature entries and
+    concatenate internally — EffectSampler callers supply per-term grids, so
+    the "x1:x2" entry is the already-concatenated tensor (issue 0060).
+    """
+    formula = {
+        "x1:x2": BayesianMLP(
+            2 * IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+        ),
+    }
+    model = BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
+
+    g = torch.Generator().manual_seed(5)
+    grid = {"x1:x2": torch.randn(N_OBS, 2 * IN, generator=g)}
+
+    sampler = EffectSampler()
+    T = 10
+    samples = sampler(model, grid, T=T)
+    assert set(samples.keys()) == {"x1:x2"}
+    assert samples["x1:x2"].shape == (T, N_OBS, family.param_count)
