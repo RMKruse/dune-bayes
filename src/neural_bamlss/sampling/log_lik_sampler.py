@@ -74,7 +74,9 @@ class LogLikSampler:
 
         Args:
             model: Fitted BayesianNAMLSS instance.
-            X: Feature dict {name: Tensor[n, in_features]}.
+            X: Feature dict {name: Tensor[n, in_features]} — the same dict
+                forward() accepts: interaction terms ("x1:x2") are supplied as
+                per-feature entries and concatenated by model.predict_params.
             y: Response tensor of shape (n,).
             T: Number of independent posterior weight draws. Defaults to T_predict.
 
@@ -87,16 +89,11 @@ class LogLikSampler:
         try:
             with torch.no_grad():
                 # T independent forward passes → summed predictor for each draw.
-                summed_list: list[torch.Tensor] = []
-                for _ in range(T):
-                    contribs = [
-                        model.nets[name](X[name]) for name in model.feature_names
-                    ]
-                    # Sum contributions; stack→sum over the feature dim.
-                    summed = torch.stack(contribs, dim=0).sum(dim=0)  # (n, param_count)
-                    summed_list.append(summed)
-
-                summed_samples = torch.stack(summed_list, dim=0)  # (T, n, param_count)
+                # predict_params is the single owner of predictor assembly
+                # (interaction keys, dropout — inert under eval(); issue 0060).
+                summed_samples = torch.stack(
+                    [model.predict_params(X) for _ in range(T)], dim=0
+                )  # (T, n, param_count)
 
                 # Pointwise log-likelihood in float64 (numerical rule: logsumexp).
                 loglik_list: list[torch.Tensor] = []
