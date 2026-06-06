@@ -4,6 +4,7 @@ Four reference-test archetypes (CLAUDE.md):
   - Shape:       predictive_quantiles output keys and tensor shapes.
   - Reference:   lo/hi are correct tail quantiles; mid is the median.
   - Behavior:    credible interval is configurable; 50% CI narrower than 90%.
+  - Behavior:    seed= leaves the caller's global torch RNG state untouched.
   - Behavior:    plot_dist returns Axes with ribbon (PolyCollection) + scatter.
 """
 
@@ -133,7 +134,32 @@ def test_credible_interval_configurable(predictive):
     assert (r50["lo"] > r90["lo"]).all(), "50% lower bound not above 90% lower bound"
 
 
-# ── 5: plot_dist returns Axes ──────────────────────────────────────────────────
+# ── 5: seed= does not clobber the caller's global RNG state ───────────────────
+
+
+def test_seeded_quantiles_preserve_global_rng_state(predictive):
+    """predictive_quantiles(seed=...) must not perturb the global torch RNG.
+
+    Seeding happens inside a forked RNG scope (torch.distributions has no
+    generator= hook on .sample()), so a draw before and after the call must
+    behave as if the call never touched the RNG.
+    """
+    from neural_bamlss.plotting import predictive_quantiles
+
+    torch.manual_seed(123)
+    expected = torch.randn(4)  # what the global stream yields without the call
+
+    torch.manual_seed(123)
+    predictive_quantiles(predictive, seed=0)
+    after = torch.randn(4)  # same stream position despite the seeded call
+
+    # Exact equality: identical RNG state must give identical draws.
+    assert torch.equal(after, expected), (
+        "predictive_quantiles(seed=...) mutated the global torch RNG state"
+    )
+
+
+# ── 6: plot_dist returns Axes ──────────────────────────────────────────────────
 
 
 def test_plot_dist_returns_axes(predictive, y):
@@ -149,7 +175,7 @@ def test_plot_dist_returns_axes(predictive, y):
     assert isinstance(ax, plt.Axes)
 
 
-# ── 6: Axes contains ribbon (PolyCollection) and scatter ──────────────────────
+# ── 7: Axes contains ribbon (PolyCollection) and scatter ──────────────────────
 
 
 def test_plot_dist_contains_ribbon_and_scatter(predictive, y):
@@ -173,7 +199,7 @@ def test_plot_dist_contains_ribbon_and_scatter(predictive, y):
     assert len(scatter) >= 1, "no scatter of actual y values found"
 
 
-# ── 7: plot_dist accepts existing Axes ────────────────────────────────────────
+# ── 8: plot_dist accepts existing Axes ────────────────────────────────────────
 
 
 def test_plot_dist_accepts_existing_axes(predictive, y):
