@@ -37,17 +37,21 @@ import torch.nn as nn
 
 from neural_bamlss.layers import (
     BayesianIntercept,
-    VariationalDense,
+    VariationalLayer,
     collect_kl,
     set_kl_beta,
 )
 
 
 def _has_bayesian_nets(formula: dict[str, nn.Module]) -> bool:
-    """Return True if any shape function contains at least one VariationalDense."""
+    """Return True if any shape function contains at least one VariationalLayer.
+
+    The base class is the single "is this Bayesian" answer (issue 0064) —
+    checking a concrete leaf would misclassify e.g. an embedding-only formula.
+    """
     for net in formula.values():
         for m in net.modules():
-            if isinstance(m, VariationalDense):
+            if isinstance(m, VariationalLayer):
                 return True
     return False
 
