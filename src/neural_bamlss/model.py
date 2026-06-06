@@ -445,8 +445,22 @@ class BayesianNAMLSS(nn.Module):
 
         Returns:
             BayesianNAMLSS with weights restored from the checkpoint.
+
+        Raises:
+            ValueError: If the formula's feature names do not match the
+                checkpoint's (same names, same order).
         """
         checkpoint = torch.load(path, weights_only=True)
+        # Fail fast with a readable message: a name mismatch would otherwise
+        # surface as a confusing load_state_dict missing/unexpected-keys error.
+        # Order is checked too so loaded.feature_names matches the saved model
+        # exactly (the round-trip guarantee covers it).
+        if list(formula.keys()) != checkpoint["feature_names"]:
+            raise ValueError(
+                f"Formula feature names {list(formula.keys())} do not match "
+                f"checkpoint feature names {checkpoint['feature_names']} "
+                f"(same names in the same order are required)."
+            )
         model = cls(
             formula=formula,
             family=family,
