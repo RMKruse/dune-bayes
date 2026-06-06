@@ -10,9 +10,9 @@ Four reference-test archetypes (CLAUDE.md):
 import pytest
 import torch
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -87,8 +87,7 @@ def test_load_restores_exact_weights(fitted_model, formula_fresh, family, tmp_pa
 
     assert set(original_sd.keys()) == set(loaded_sd.keys()), "key sets must match"
     max_delta = max(
-        (original_sd[k] - loaded_sd[k]).abs().max().item()
-        for k in original_sd
+        (original_sd[k] - loaded_sd[k]).abs().max().item() for k in original_sd
     )
     assert max_delta == 0.0, f"max|Δw| = {max_delta} after round-trip; expected 0"
 
@@ -96,7 +95,9 @@ def test_load_restores_exact_weights(fitted_model, formula_fresh, family, tmp_pa
 # ── 3. loaded model runs a forward pass — AC4 ────────────────────────────────
 
 
-def test_loaded_model_forward_shape(fitted_model, formula_fresh, family, tmp_path, X_batch):
+def test_loaded_model_forward_shape(
+    fitted_model, formula_fresh, family, tmp_path, X_batch
+):
     """Loaded model forward() returns a distribution with the correct batch shape."""
     path = tmp_path / "model.pt"
     fitted_model.save(path)
@@ -127,13 +128,34 @@ def test_load_preserves_feature_names(fitted_model, formula_fresh, family, tmp_p
     assert loaded.feature_names == fitted_model.feature_names
 
 
+def test_load_preserves_intercept_mode(family, tmp_path):
+    """intercept_mode survives the round-trip — a point-mode model must not come
+    back variational (the state_dicts are not even compatible: no rho)."""
+    torch.manual_seed(0)
+    formula = {
+        "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+    }
+    model = BayesianNAMLSS(
+        formula=formula, family=family, n_obs=N_OBS, intercept_mode="point"
+    )
+    formula_fresh = {
+        "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+    }
+    path = tmp_path / "model.pt"
+    model.save(path)
+    loaded = BayesianNAMLSS.load(path, formula=formula_fresh, family=family)
+    assert loaded.intercept.mode == "point"
+
+
 def test_load_preserves_feature_dropout(family, tmp_path):
     """feature_dropout is preserved across the round-trip."""
     torch.manual_seed(0)
     formula = {
         "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
     }
-    model = BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS, feature_dropout=0.2)
+    model = BayesianNAMLSS(
+        formula=formula, family=family, n_obs=N_OBS, feature_dropout=0.2
+    )
     formula_fresh = {
         "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
     }
@@ -141,6 +163,19 @@ def test_load_preserves_feature_dropout(family, tmp_path):
     model.save(path)
     loaded = BayesianNAMLSS.load(path, formula=formula_fresh, family=family)
     assert loaded.feature_dropout == pytest.approx(0.2)
+
+
+def test_load_rejects_mismatched_feature_names(fitted_model, family, tmp_path):
+    """load() with a formula whose feature names don't match the checkpoint
+    raises ValueError naming both sides — not a cryptic load_state_dict error."""
+    path = tmp_path / "model.pt"
+    fitted_model.save(path)
+    torch.manual_seed(99)
+    formula_wrong = {
+        "x2": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+    }
+    with pytest.raises(ValueError, match=r"x2.*x1|feature names"):
+        BayesianNAMLSS.load(path, formula=formula_wrong, family=family)
 
 
 # ── 5. full-model pickle round-trip — AC2 ────────────────────────────────────
@@ -160,10 +195,11 @@ def test_full_model_pickle_round_trip(fitted_model, tmp_path, X_batch):
     loaded_sd = loaded.state_dict()
 
     max_delta = max(
-        (original_sd[k] - loaded_sd[k]).abs().max().item()
-        for k in original_sd
+        (original_sd[k] - loaded_sd[k]).abs().max().item() for k in original_sd
     )
-    assert max_delta == 0.0, f"max|Δw| = {max_delta} after full-model pickle; expected 0"
+    assert max_delta == 0.0, (
+        f"max|Δw| = {max_delta} after full-model pickle; expected 0"
+    )
 
 
 def test_full_model_pickle_forward_shape(fitted_model, tmp_path, X_batch):

@@ -1,6 +1,7 @@
-# Context: neural-bamlss
+# Context: dune-bayes
 
-The neural analog of the **BAMLSS** R package (Bayesian Additive Models for
+**DUNE — Distributional Uncertainty in Neural-additive Estimation**, the
+neural analog of the **BAMLSS** R package (Bayesian Additive Models for
 Location, Scale and Shape). It is being built by taking the `NAMpy` package
 (deterministic interpretable additive distributional-regression models) and
 replacing the deterministic feature networks with **Bayesian** feature networks,
@@ -31,7 +32,7 @@ uncertainty.
 
 ## Packaging
 
-**neural-bamlss is its own package**, reusing NAMpy's machinery by design — but the
+**dune-bayes is its own package**, reusing NAMpy's machinery by design — but the
 reuse splits by backend (ADR-0006). NAMpy stays on TF/Keras/TFP and is **not
 rewritten**:
 
@@ -48,14 +49,14 @@ ported into the PyTorch tree).
 
 ## Model class & training UX
 
-The user instantiates a dedicated **`BayesianNAMLSS`** class (neural-bamlss),
+The user instantiates a dedicated **`BayesianNAMLSS`** class (dune-bayes),
 which owns posterior sampling, the `MixtureSameFamily` predictive, credible-band
 plotting, and the WAIC/LOO methods. It handles **full or partial-Bayesian**
 formulas (a deterministic net is a degenerate zero-variance contributor). The
 deterministic `NAMLSS` stays untouched. v1 covers `BayesianNAMLSS`; Bayesian
 variants of NATTLSS/transformer-LSS come later.
 
-Training keeps the familiar **`compile(loss=model.Loss)` / `fit()`** surface:
+Training keeps the familiar **`compile(loss=model.loss)` / `fit()`** surface:
 KL/N is added automatically via `add_loss`, and the KL warm-up callback is
 auto-injected by a `fit()` override (on by default). New capabilities
 (`sample_posterior_predictive`, `waic`/`loo`/`compare`, banded `plot`) are
@@ -87,7 +88,7 @@ secondary, biased evidence proxy. No literal Bayes Factors (ADR-0001).
   uncertainty; the Bayesian weights add **epistemic** uncertainty on top.
 - **Aleatoric vs epistemic uncertainty** — aleatoric = irreducible noise in the
   response, captured by the family. Epistemic = uncertainty about the learned
-  effects, captured by the posterior over weights. neural-bamlss models both.
+  effects, captured by the posterior over weights. dune-bayes models both.
 - **Inference engine** — the method that turns priors + likelihood into a
   posterior. Decided: **mean-field variational inference** (see ADR-0001).
 - **ELBO** — evidence lower bound; the training objective = NLL + weight-KL/N.

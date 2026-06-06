@@ -4,7 +4,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from neural_bamlss.families import StudentTFamily
+from dune_bayes.families import StudentTFamily
 
 
 @pytest.fixture
@@ -60,5 +60,5 @@ class TestStudentTFamilyContract:
     def test_validate_args_rejects_nan_params(self):
         family_strict = StudentTFamily(validate_args=True)
         nan_params = torch.tensor([[float("nan"), float("nan"), float("nan")]])
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             family_strict(nan_params).log_prob(torch.tensor([0.0]))

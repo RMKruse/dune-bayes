@@ -1,8 +1,9 @@
-"""Tests for LogLikSampler workhorse (issue 0007 / GitHub #8).
+"""Tests for draw_predictive + pointwise_log_lik (issue 0007 / GitHub #8, #68).
 
 Four reference-test archetypes (CLAUDE.md):
-  - Shape:         summed_samples (T, n, param_count), pointwise_loglik (T, n).
-  - Behavior:      loglik is float64, predictive is MixtureSameFamily, T_eval=1000.
+  - Shape:         summed_samples (T, n, param_count), pointwise_log_lik (T, n).
+  - Behavior:      loglik is float64, predictive is MixtureSameFamily, T_EVAL=1000;
+                   sample_posterior_predictive never evaluates log_prob (#68).
   - Pure function: model state unchanged after sampling.
   - Reference:     degenerate single-draw loglik == direct family log_prob;
                    law of total variance holds for the predictive.
@@ -11,10 +12,10 @@ Four reference-test archetypes (CLAUDE.md):
 import pytest
 import torch
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.sampling import LogLikSampler
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.sampling import T_EVAL, draw_predictive, pointwise_log_lik
+from dune_bayes.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -53,61 +54,59 @@ def data_y():
 
 
 def test_summed_samples_and_loglik_shape(model, data_x, data_y, family):
-    """summed_samples is (T, n, param_count); pointwise_loglik is (T, n)."""
-    sampler = LogLikSampler()
+    """summed_samples is (T, n, param_count); pointwise_log_lik is (T, n)."""
     T = 10
-    result = sampler(model, data_x, data_y, T=T)
-    assert result.summed_samples.shape == (T, N_OBS, family.param_count)
-    assert result.pointwise_loglik.shape == (T, N_OBS)
+    draws = draw_predictive(model, data_x, T=T)
+    ll = pointwise_log_lik(model, draws.summed_samples, data_y)
+    assert draws.summed_samples.shape == (T, N_OBS, family.param_count)
+    assert ll.shape == (T, N_OBS)
 
 
-# ── 2: pointwise_loglik is float64 ────────────────────────────────────────────
+# ── 2: pointwise_log_lik is float64 ───────────────────────────────────────────
 
 
 def test_loglik_is_float64(model, data_x, data_y):
-    """pointwise_loglik must be float64 for WAIC/LOO accumulation (numerical rule)."""
-    sampler = LogLikSampler()
-    result = sampler(model, data_x, data_y, T=5)
-    assert result.pointwise_loglik.dtype == torch.float64
+    """pointwise_log_lik must be float64 for WAIC/LOO accumulation (numerical rule)."""
+    draws = draw_predictive(model, data_x, T=5)
+    ll = pointwise_log_lik(model, draws.summed_samples, data_y)
+    assert ll.dtype == torch.float64
 
 
 # ── 3: Predictive is MixtureSameFamily with correct batch shape ───────────────
 
 
-def test_predictive_is_mixture_same_family(model, data_x, data_y):
+def test_predictive_is_mixture_same_family(model, data_x):
     """predictive is a torch.distributions.MixtureSameFamily."""
-    sampler = LogLikSampler()
-    result = sampler(model, data_x, data_y, T=10)
-    assert isinstance(result.predictive, torch.distributions.MixtureSameFamily)
+    draws = draw_predictive(model, data_x, T=10)
+    assert isinstance(draws.predictive, torch.distributions.MixtureSameFamily)
 
 
-def test_predictive_batch_shape(model, data_x, data_y):
+def test_predictive_batch_shape(model, data_x):
     """predictive.batch_shape == (n,) — one predictive per observation."""
-    sampler = LogLikSampler()
-    result = sampler(model, data_x, data_y, T=10)
-    assert result.predictive.batch_shape == (N_OBS,)
+    draws = draw_predictive(model, data_x, T=10)
+    assert draws.predictive.batch_shape == (N_OBS,)
 
 
 # ── 4: Degenerate single-draw loglik matches direct family log_prob ───────────
 
 
 def test_single_draw_loglik_matches_direct(model, data_x, data_y, family):
-    """With T=1, pointwise_loglik[0] == family(summed_samples[0]).log_prob(y).
+    """With T=1, pointwise_log_lik[0] == family(summed_samples[0]).log_prob(y).
 
     Tolerance: float32 forward pass cast to float64 vs a float32 log_prob;
     difference is at float32 epsilon (≈6e-8 relative) — atol=1e-5 is conservative.
     """
-    sampler = LogLikSampler()
     torch.manual_seed(42)
-    result = sampler(model, data_x, data_y, T=1)
+    draws = draw_predictive(model, data_x, T=1)
+    ll = pointwise_log_lik(model, draws.summed_samples, data_y)
 
     # Recompute directly from the stored summed_samples (T=0 draw).
     with torch.no_grad():
-        dist_direct = family(result.summed_samples[0])  # family uses float32 params
+        dist_direct = family(draws.summed_samples[0])  # family uses float32 params
         loglik_direct = dist_direct.log_prob(data_y).to(torch.float64)
 
     assert torch.allclose(
-        result.pointwise_loglik[0],
+        ll[0],
         loglik_direct,
         atol=1e-5,
     ), "single-draw loglik deviates from direct family log_prob"
@@ -116,24 +115,22 @@ def test_single_draw_loglik_matches_direct(model, data_x, data_y, family):
 # ── 5: Pure function — no model-state mutation ────────────────────────────────
 
 
-def test_pure_function_preserves_training_mode(model, data_x, data_y):
+def test_pure_function_preserves_training_mode(model, data_x):
     """Training mode is restored after sampling, regardless of initial mode."""
-    sampler = LogLikSampler()
-
     model.train()
-    sampler(model, data_x, data_y, T=5)
+    draw_predictive(model, data_x, T=5)
     assert model.training, "training mode not restored after sampling"
 
     model.eval()
-    sampler(model, data_x, data_y, T=5)
+    draw_predictive(model, data_x, T=5)
     assert not model.training, "eval mode not restored after sampling"
 
 
 def test_pure_function_preserves_parameters(model, data_x, data_y):
     """Posterior parameters (loc, rho) are identical before and after sampling."""
-    sampler = LogLikSampler()
     params_before = {k: v.clone() for k, v in model.named_parameters()}
-    sampler(model, data_x, data_y, T=20)
+    draws = draw_predictive(model, data_x, T=20)
+    pointwise_log_lik(model, draws.summed_samples, data_y)
     for name, val in model.named_parameters():
         assert torch.equal(params_before[name], val), f"parameter {name!r} mutated"
 
@@ -141,7 +138,7 @@ def test_pure_function_preserves_parameters(model, data_x, data_y):
 # ── 6: Law of total variance — Var[Y] = aleatoric + epistemic ─────────────────
 
 
-def test_law_of_total_variance(model, data_x, data_y):
+def test_law_of_total_variance(model, data_x):
     """predictive.variance ≈ E[Var[Y|θ]] + Var[E[Y|θ]] across T weight draws.
 
     Law of total variance: total = aleatoric + epistemic.
@@ -151,19 +148,18 @@ def test_law_of_total_variance(model, data_x, data_y):
     atol=0.05 is conservative given typical Normal variance magnitude.
     """
     torch.manual_seed(0)
-    sampler = LogLikSampler()
     T = 500
-    result = sampler(model, data_x, data_y, T=T)
+    draws = draw_predictive(model, data_x, T=T)
 
     family = model.family
     # Component means and variances over the T draws.
     # summed_samples: (T, n, param_count)
     with torch.no_grad():
         comp_means = torch.stack(
-            [family(result.summed_samples[t]).mean for t in range(T)], dim=0
+            [family(draws.summed_samples[t]).mean for t in range(T)], dim=0
         )  # (T, n)
         comp_vars = torch.stack(
-            [family(result.summed_samples[t]).variance for t in range(T)], dim=0
+            [family(draws.summed_samples[t]).variance for t in range(T)], dim=0
         )  # (T, n)
 
     # Law of total variance decomposition.
@@ -171,7 +167,7 @@ def test_law_of_total_variance(model, data_x, data_y):
     epistemic = comp_means.var(dim=0)  # Var[E[Y|θ]], shape (n,)
     loto_var = aleatoric + epistemic  # (n,)
 
-    mixture_var = result.predictive.variance  # (n,)
+    mixture_var = draws.predictive.variance  # (n,)
 
     assert torch.allclose(
         mixture_var.float(),
@@ -179,7 +175,7 @@ def test_law_of_total_variance(model, data_x, data_y):
         atol=0.05,
     ), (
         f"law of total variance violated: "
-        f"max|Δ|={( mixture_var.float() - loto_var.float()).abs().max():.4f}"
+        f"max|Δ|={(mixture_var.float() - loto_var.float()).abs().max():.4f}"
     )
 
 
@@ -194,9 +190,167 @@ def test_sample_posterior_predictive_returns_mixture(model, data_x):
     assert predictive.batch_shape == (N_OBS,)
 
 
-# ── 8: T_eval class attribute ─────────────────────────────────────────────────
+class _LogProbTrap(NormalFamily):
+    """Normal family whose log_prob raises — sentinel for the dummy-y hack (#68).
+
+    The pre-#68 sample_posterior_predictive scored a fabricated y=0 through
+    the full log-likelihood path; drawing the predictive must never evaluate
+    log_prob, so a distribution that raises on it proves the path is gone.
+    """
+
+    def __call__(self, params):
+        dist = super().__call__(params)
+
+        def _raise(value):
+            raise AssertionError(
+                "sample_posterior_predictive evaluated log_prob (dummy-y hack)"
+            )
+
+        dist.log_prob = _raise
+        return dist
 
 
-def test_t_eval_class_attribute():
-    """LogLikSampler.T_eval is 1000 for information-criterion runs."""
-    assert LogLikSampler.T_eval == 1000
+def test_sample_posterior_predictive_never_scores(data_x):
+    """Drawing the predictive evaluates no log_prob (GitHub #68).
+
+    The old implementation fabricated y_dummy = zeros(n) and ran the scoring
+    path — out of support for e.g. the Gamma family, surviving only because
+    validate_args=False. A trap family that raises on log_prob would have
+    tripped it; the split draw_predictive must pass.
+    """
+    family = _LogProbTrap()
+    formula = {
+        "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+    }
+    model = BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
+    predictive = model.sample_posterior_predictive(data_x, T=5)
+    assert isinstance(predictive, torch.distributions.MixtureSameFamily)
+
+
+# ── 8: T_EVAL module constant ─────────────────────────────────────────────────
+
+
+def test_t_eval_constant():
+    """T_EVAL is 1000 for information-criterion runs (CONTEXT.md MC sample counts)."""
+    assert T_EVAL == 1000
+
+
+# ── 9: Interaction terms — sampler accepts the same X dict as forward ─────────
+# (issue 0060: predictor assembly is the model's concept; the sampler must not
+# re-implement it and drift on interaction keys.)
+
+
+@pytest.fixture
+def interaction_model(family):
+    formula = {
+        "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+        "x1:x2": BayesianMLP(
+            2 * IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+        ),
+    }
+    return BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
+
+
+@pytest.fixture
+def interaction_x():
+    g = torch.Generator().manual_seed(3)
+    return {
+        "x1": torch.randn(N_OBS, IN, generator=g),
+        "x2": torch.randn(N_OBS, IN, generator=g),
+    }
+
+
+def test_interaction_model_loglik_shapes_and_finite(
+    interaction_model, interaction_x, data_y, family
+):
+    """An "x1:x2" model works through the sampler on the same X dict as forward."""
+    T = 5
+    draws = draw_predictive(interaction_model, interaction_x, T=T)
+    ll = pointwise_log_lik(interaction_model, draws.summed_samples, data_y)
+    assert draws.summed_samples.shape == (T, N_OBS, family.param_count)
+    assert ll.shape == (T, N_OBS)
+    assert torch.isfinite(ll).all()
+
+
+def test_interaction_model_posterior_predictive(interaction_model, interaction_x):
+    """sample_posterior_predictive works for interaction models (Goal 3 path)."""
+    predictive = interaction_model.sample_posterior_predictive(interaction_x, T=10)
+    assert isinstance(predictive, torch.distributions.MixtureSameFamily)
+    assert predictive.batch_shape == (N_OBS,)
+
+
+# ── 10: Vectorized sweep — chunking over T (issue 0027 / GitHub #80) ──────────
+
+
+def test_draw_predictive_chunked_full_t_and_independent(model, data_x, family):
+    """chunk_size < T still yields (T, n, param_count) summed_samples with every
+    draw independent (incl. across chunk boundaries) and an (n,)-batch mixture.
+
+    chunk_size is the internal memory knob (issue 0027): draws are batched per
+    dispatch and concatenated over T. Identical draws anywhere would mean one
+    posterior sample was broadcast instead of freshly drawn.
+    """
+    torch.manual_seed(31)
+    T, chunk = 10, 4  # chunks of 4, 4, 2 — exercises the ragged tail
+    draws = draw_predictive(model, data_x, T=T, chunk_size=chunk)
+    assert draws.summed_samples.shape == (T, N_OBS, family.param_count)
+    assert draws.predictive.batch_shape == (N_OBS,)
+    for t in range(1, T):
+        assert not torch.equal(draws.summed_samples[0], draws.summed_samples[t]), (
+            f"draw {t} equals draw 0 — broadcast instead of independent draws"
+        )
+
+
+def test_pointwise_log_lik_matches_loop_reference(model, data_x, data_y, family):
+    """pointwise_log_lik equals a per-draw loop given identical summed_samples.
+
+    Deterministic given the draws — no MC noise. The reference inlines the
+    pre-issue-0027 loop: score each (n, param_count) slice through the family,
+    cast to float64, stack. Tolerance atol=1e-6 is pure float32 arithmetic
+    headroom (broadcast vs per-slice elementwise kernels are bitwise-identical
+    in practice; the atol guards against kernel-order variation only).
+    """
+    torch.manual_seed(33)
+    T = 20
+    draws = draw_predictive(model, data_x, T=T)
+    ll = pointwise_log_lik(model, draws.summed_samples, data_y)
+
+    with torch.no_grad():
+        ref = torch.stack(
+            [
+                family(draws.summed_samples[t]).log_prob(data_y).to(torch.float64)
+                for t in range(T)
+            ],
+            dim=0,
+        )
+
+    assert ll.shape == ref.shape == (T, N_OBS)
+    assert torch.allclose(ll, ref, atol=1e-6, rtol=0.0)
+
+
+def test_draw_predictive_with_embedding_net(data_y, family):
+    """A categorical random-effect formula sweeps vectorized like dense nets.
+
+    BayesianEmbedding draws per-element local-reparameterization noise
+    (issue 0027), so the expanded index tensor yields T independent draws —
+    same shape/independence contract as the dense path.
+    """
+    from dune_bayes.layers import BayesianEmbedding
+
+    torch.manual_seed(34)
+    formula = {
+        "group": BayesianEmbedding(
+            num_embeddings=4, embedding_dim=family.param_count, kl_divisor=N_OBS
+        )
+    }
+    emb_model = BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
+    X = {"group": torch.randint(0, 4, (N_OBS,))}
+
+    T = 10
+    draws = draw_predictive(emb_model, X, T=T, chunk_size=4)
+    ll = pointwise_log_lik(emb_model, draws.summed_samples, data_y)
+    assert draws.summed_samples.shape == (T, N_OBS, family.param_count)
+    assert ll.shape == (T, N_OBS)
+    assert torch.isfinite(ll).all()
+    for t in range(1, T):
+        assert not torch.equal(draws.summed_samples[0], draws.summed_samples[t])

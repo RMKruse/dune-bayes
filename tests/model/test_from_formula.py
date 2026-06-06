@@ -9,10 +9,10 @@ import pytest
 import torch
 import torch.nn as nn
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.layers import collect_kl
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.shapes import BayesianMLP, NeuralLinearMLP, ShapeFunctionRegistry
+from dune_bayes.families import NormalFamily
+from dune_bayes.layers import collect_kl
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.shapes import BayesianMLP, NeuralLinearMLP, ShapeFunctionRegistry
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -106,7 +106,9 @@ def test_mixed_bayesian_and_deterministic_terms_train(plain_linear_registered, X
     assert collect_kl(model).item() > 0.0
 
 
-def test_deterministic_only_formula_contributes_zero_kl(plain_linear_registered, X_y):
+def test_deterministic_only_formula_terms_contribute_zero_kl(
+    plain_linear_registered, X_y
+):
     X, _ = X_y
     torch.manual_seed(42)
     model = BayesianNAMLSS.from_formula(
@@ -116,5 +118,21 @@ def test_deterministic_only_formula_contributes_zero_kl(plain_linear_registered,
     )
     model(X)
     # Deterministic terms are degenerate zero-variance contributors
-    # (CONTEXT.md): exactly zero KL, not approximately.
+    # (CONTEXT.md): every bit of model KL is the intercept's — exactly, not
+    # approximately (same tensor in the walk).
+    assert collect_kl(model).item() == model.intercept.kl.item()
+    assert model.intercept.kl.item() > 0.0
+
+
+def test_from_formula_point_intercept_gives_zero_kl(plain_linear_registered, X_y):
+    X, _ = X_y
+    torch.manual_seed(42)
+    model = BayesianNAMLSS.from_formula(
+        f"y ~ {plain_linear_registered}(x1) + {plain_linear_registered}(x2)",
+        family=NormalFamily(),
+        n_obs=N_OBS,
+        intercept_mode="point",
+    )
+    model(X)
+    # Point intercept + deterministic terms: the fully-deterministic model.
     assert collect_kl(model).item() == 0.0

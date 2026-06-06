@@ -9,11 +9,11 @@ TensorFlow/Keras/TFP-specific claims to PyTorch; their statistical decisions are
 unchanged — see *Relationship to other ADRs*).
 
 > **Amendment (2026-06-03): reuse → reimplement.** This ADR's *Scope* section
-> originally said neural-bamlss "reuses NAMpy's TF-free Python directly — the
+> originally said dune-bayes "reuses NAMpy's TF-free Python directly — the
 > formula parser (`nampy/formulas/`) and the `ShapeFunctionRegistry` pattern …
-> imported or adapted as-is." That is **superseded**: neural-bamlss now treats the
+> imported or adapted as-is." That is **superseded**: dune-bayes now treats the
 > **entire `NAMpy/` tree as reference-only** and **reimplements the formula parser
-> and `ShapeFunctionRegistry` from scratch** in its own `src/neural_bamlss/`
+> and `ShapeFunctionRegistry` from scratch** in its own `src/dune_bayes/`
 > namespace. NAMpy is read to see how things were done before, but **no NAMpy code
 > is imported, vendored, or ported.** Rationale: a single clean PyTorch namespace
 > with no cross-package coupling, at the modest cost of reimplementing the parser.
@@ -23,7 +23,7 @@ unchanged — see *Relationship to other ADRs*).
 
 ## Context
 
-neural-bamlss is being built by Bayesian-ifying NAMpy, which today runs on
+dune-bayes is being built by Bayesian-ifying NAMpy, which today runs on
 **TensorFlow / Keras 2 / TensorFlow-Probability (TFP)**. Before the Bayesian half
 is implemented, we need to decide whether that is the backend we commit to for the
 package's life. The decision is forced now because it is far cheaper now than
@@ -110,9 +110,9 @@ behind that seam, not a rewrite. PyTorch is the pragmatic *present*; JAX is the
 
 ### Scope: NAMpy is not rewritten
 
-This backend switch governs **neural-bamlss's own (new) code**, not the upstream
+This backend switch governs **dune-bayes's own (new) code**, not the upstream
 `NAMpy/` package. NAMpy **stays on TensorFlow / Keras / TFP and is not ported** — it
-remains the deterministic baseline and the source of reusable machinery. neural-bamlss
+remains the deterministic baseline and the source of reusable machinery. dune-bayes
 is its **own PyTorch package** that:
 
 - **Reuses NAMpy's TF-free Python directly** — the formula parser
@@ -125,8 +125,8 @@ is its **own PyTorch package** that:
   replacing the Keras `Normalization`/`StringLookup`/`Discretization`/PLE/spline
   layers), and the shape functions (Keras `Layer`/`Model` → `nn.Module`). The
   verified `spikes/VariationalDense` is the seed of the new Bayesian atom.
-- **Data stack decision:** the neural-bamlss runtime is **pure PyTorch** — no
-  TensorFlow import anywhere in neural-bamlss. Batching via `torch.utils.data`;
+- **Data stack decision:** the dune-bayes runtime is **pure PyTorch** — no
+  TensorFlow import anywhere in dune-bayes. Batching via `torch.utils.data`;
   preprocessing via numpy/sklearn.
 
 Where a deterministic NAMpy baseline is needed for WAIC/LOO comparison (CONTEXT),
@@ -149,7 +149,7 @@ into the PyTorch tree.
 
 **Negative / accepted trade-offs**
 
-- **Reimplementation cost:** the TF/TFP-coupled machinery neural-bamlss wanted to
+- **Reimplementation cost:** the TF/TFP-coupled machinery dune-bayes wanted to
   reuse from NAMpy (families, `DataModule`, shape functions) cannot cross the
   backend boundary and must be **reimplemented** in PyTorch rather than imported
   (see *Scope*). Only NAMpy's TF-free Python (formula parser, registry) is reused

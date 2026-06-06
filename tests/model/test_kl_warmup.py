@@ -10,10 +10,10 @@ Acceptance criteria tested here:
 import pytest
 import torch
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.layers.variational_dense import VariationalDense
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.layers.variational_dense import VariationalDense
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -50,8 +50,7 @@ def X_y():
 
 def _full_kl_reference(model, X):
     """Return the KL produced by a single forward pass with β=1 (no warm-up scaling)."""
-    from neural_bamlss.layers import collect_kl
-    from neural_bamlss.layers.variational_dense import set_kl_beta
+    from dune_bayes.layers import collect_kl, set_kl_beta
 
     set_kl_beta(model, 1.0)
     model(X)
@@ -68,7 +67,8 @@ def test_warmup_auto_injected(model, X_y):
     have kl_beta == 1.0 (schedule completed, no β argument passed by the user).
     """
     X, y = X_y
-    # β = min(1, epoch / warmup_epochs) → first hits 1.0 at epoch index == warmup_epochs.
+    # β = min(1, epoch / warmup_epochs) → first hits 1.0 at epoch index
+    # == warmup_epochs.
     # Train warmup_epochs + 1 steps so the final epoch starts with β = 1.0.
     warmup = 4
     model.fit(X, y, epochs=warmup + 1, lr=1e-2, warmup_epochs=warmup)

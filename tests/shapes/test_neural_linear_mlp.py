@@ -12,8 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers import VariationalDense, collect_kl
-from neural_bamlss.shapes import NeuralLinearMLP, ShapeFunctionRegistry
+from dune_bayes.layers import VariationalDense, collect_kl
+from dune_bayes.shapes import NeuralLinearMLP, ShapeFunctionRegistry
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@ def test_kl_strictly_less_than_bayesian_mlp(x):
     BayesianMLP with hidden_dims=[8, 8] has 3 VariationalDense layers;
     NeuralLinearMLP has only 1 — so its total KL must be strictly smaller.
     """
-    from neural_bamlss.shapes import BayesianMLP
+    from dune_bayes.shapes import BayesianMLP
 
     torch.manual_seed(0)
     fully_var = BayesianMLP(IN, PARAM_COUNT, hidden_dims=[8, 8], validate_args=True)
@@ -137,7 +137,7 @@ def test_round_trip_state_dict_exact(model):
     restored.load_state_dict(model.state_dict())
 
     for (k, orig), (_, rest) in zip(
-        model.state_dict().items(), restored.state_dict().items()
+        model.state_dict().items(), restored.state_dict().items(), strict=True
     ):
         max_delta = (orig - rest).abs().max().item()
         assert max_delta == 0.0, f"weight '{k}' differs after round-trip"
@@ -186,3 +186,46 @@ def test_hidden_basis_is_deterministic(model, x):
 
     # Exact equality: deterministic nn.Linear → identical intermediate features.
     assert (basis1 - basis2).abs().max().item() == 0.0
+
+
+# ── per-net PriorScale tiers (ADR-0002, issue #73) ────────────────────────────
+
+
+def test_prior_empirical_bayes_learns_scale_through_elbo(x):
+    """prior='empirical_bayes' wires the learnable scale into the output-layer KL.
+
+    Only the output layer is variational here, so the EB gradient path runs
+    through that single layer's KL (ADR-0002's REML analog).
+    """
+    torch.manual_seed(21)
+    net = NeuralLinearMLP(IN, PARAM_COUNT, hidden_dims=[8], prior="empirical_bayes")
+    net(x)
+    collect_kl(net).backward()
+
+    assert net.prior_scale_handle is not None
+    assert net.output_layer.prior_scale_handle is net.prior_scale_handle
+    assert net.prior_scale_handle.rho.grad is not None
+    assert float(net.prior_scale_handle.rho.grad) != 0.0
+
+
+def test_prior_round_trip_config_and_state_dict(x):
+    """A prior-carrying net round-trips: config values + max|Δw| == 0."""
+    torch.manual_seed(22)
+    net = NeuralLinearMLP(
+        IN,
+        PARAM_COUNT,
+        hidden_dims=[8],
+        prior_scale=0.5,
+        prior={"mode": "hierarchical", "hyperprior": "inverse_gamma"},
+        kl_divisor=32.0,
+    )
+    config = net.get_config()
+    assert config["prior"] == {"mode": "hierarchical", "hyperprior": "inverse_gamma"}
+
+    restored = NeuralLinearMLP.from_config(config)
+    restored.load_state_dict(net.state_dict())
+
+    sa, sb = net.state_dict(), restored.state_dict()
+    assert sa.keys() == sb.keys(), "state_dict key sets differ"
+    max_delta = max(float((sa[k] - sb[k]).abs().max()) for k in sa)
+    assert max_delta == 0.0, f"max|Δw| = {max_delta:.2e}"

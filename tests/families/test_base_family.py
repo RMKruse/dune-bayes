@@ -4,7 +4,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from neural_bamlss.families import BaseFamily, NormalFamily
+from dune_bayes.families import BaseFamily, NormalFamily
 
 
 @pytest.fixture
@@ -59,7 +59,7 @@ class TestNormalFamilyIsBaseFamily:
         # validate_args=True must catch NaN distribution parameters.
         family_strict = NormalFamily(validate_args=True)
         nan_params = torch.tensor([[float("nan"), float("nan")]])
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             family_strict(nan_params).log_prob(torch.tensor([0.0]))
 
 

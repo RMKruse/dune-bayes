@@ -10,7 +10,7 @@ Four reference-test archetypes (CLAUDE.md):
 import pytest
 import torch
 
-from neural_bamlss.plotting import plot_effect_ribbon, ribbon_quantiles
+from dune_bayes.plotting import plot_effect_ribbon, ribbon_quantiles
 
 # ── constants ─────────────────────────────────────────────────────────────────
 

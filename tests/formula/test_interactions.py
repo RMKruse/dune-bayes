@@ -4,11 +4,9 @@ Boundary tests: joint-net parsing, combined-key contract, mixed formulas,
 kwarg forwarding, and end-to-end training. Asserts external behavior only.
 """
 
-import pytest
-
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.formula import build_formula, parse_formula
-from neural_bamlss.shapes import BayesianMLP, NeuralLinearMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.formula import build_formula, parse_formula
+from dune_bayes.shapes import BayesianMLP
 
 # ── tracer bullet: single interaction term ────────────────────────────────────
 
@@ -41,9 +39,7 @@ def test_interaction_uses_shape_from_first_factor():
 
 
 def test_mixed_formula_builds_additive_and_interaction_entries():
-    parsed = parse_formula(
-        "y ~ BayesianMLP(x1) + BayesianMLP(x2):BayesianMLP(x3)"
-    )
+    parsed = parse_formula("y ~ BayesianMLP(x1) + BayesianMLP(x2):BayesianMLP(x3)")
     formula = build_formula(parsed, family=NormalFamily())
 
     assert set(formula.keys()) == {"x1", "x2:x3"}
@@ -59,8 +55,7 @@ def test_mixed_formula_builds_additive_and_interaction_entries():
 
 def test_interaction_kwargs_from_first_factor_are_forwarded():
     parsed = parse_formula(
-        "y ~ BayesianMLP(x1, prior_scale=0.5, hidden_dims=(16,))"
-        ":BayesianMLP(x2)"
+        "y ~ BayesianMLP(x1, prior_scale=0.5, hidden_dims=(16,)):BayesianMLP(x2)"
     )
     formula = build_formula(parsed, family=NormalFamily())
 
@@ -74,7 +69,7 @@ def test_interaction_kwargs_from_first_factor_are_forwarded():
 def test_mixed_interaction_formula_trains_end_to_end():
     import torch
 
-    from neural_bamlss.model import BayesianNAMLSS
+    from dune_bayes.model import BayesianNAMLSS
 
     torch.manual_seed(0)
     X = {
@@ -94,5 +89,5 @@ def test_mixed_interaction_formula_trains_end_to_end():
     # Formula dict has additive entry for x1 and interaction entry for x2:x3.
     assert set(model.nets.keys()) == {"x1", "x2:x3"}
 
-    loss = model.Loss(X, y)
+    loss = model.loss(X, y)
     assert loss.isfinite(), f"ELBO loss is not finite: {loss}"

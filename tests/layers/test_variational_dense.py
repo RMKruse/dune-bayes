@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers import VariationalDense, collect_kl, set_kl_beta
+from dune_bayes.layers import VariationalDense, collect_kl, set_kl_beta
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -68,9 +68,9 @@ def test_kl_matches_closed_form_reference(layer, x):
 
     # float32 machine eps ~1e-7; 1e-5 relative tolerance is conservative
     # (pure arithmetic, no MC noise).
-    assert float(layer.kl.detach()) == pytest.approx(
-        expected_kl, rel=1e-5
-    ), f"stashed kl={float(layer.kl.detach()):.6f} vs reference={expected_kl:.6f}"
+    assert float(layer.kl.detach()) == pytest.approx(expected_kl, rel=1e-5), (
+        f"stashed kl={float(layer.kl.detach()):.6f} vs reference={expected_kl:.6f}"
+    )
 
 
 # ── 3. set_kl_beta utility ───────────────────────────────────────────────────
@@ -126,7 +126,8 @@ class _NestedModel(nn.Module):
         )
 
     def forward(self, xs: list[torch.Tensor]) -> torch.Tensor:
-        return torch.stack([net(x) for net, x in zip(self.nets, xs)]).sum(0)
+        pairs = zip(self.nets, xs, strict=True)
+        return torch.stack([net(x) for net, x in pairs]).sum(0)
 
 
 def test_collect_kl_reaches_all_variational_layers():
@@ -168,9 +169,9 @@ def test_collect_kl_beta_zero_zeroes_total():
 def test_get_config_is_closure_free(layer):
     """get_config() contains only ints, floats, strings, and bools — no callables."""
     cfg = layer.get_config()
-    assert all(
-        not callable(v) for v in cfg.values()
-    ), f"callable values found in config: {[k for k, v in cfg.items() if callable(v)]}"
+    assert all(not callable(v) for v in cfg.values()), (
+        f"callable values found in config: {[k for k, v in cfg.items() if callable(v)]}"
+    )
 
 
 def test_from_config_preserves_hyperparameters():
@@ -259,6 +260,187 @@ def test_flipout_vanilla_agree_in_expectation():
     # abs=0.05: MC std_err ≈ σ_out/√T ≈ 0.1/√2000 ≈ 0.002 per element;
     # 0.05 gives 25× headroom while catching any genuine bias (which would be O(σ)).
     # rel tolerance is avoided because expected values can be near zero.
-    assert mean_vanilla == pytest.approx(
-        mean_flipout.numpy(), abs=0.05
-    ), "flipout and vanilla means diverged — they must agree in expectation"
+    assert mean_vanilla == pytest.approx(mean_flipout.numpy(), abs=0.05), (
+        "flipout and vanilla means diverged — they must agree in expectation"
+    )
+
+
+# ── 9. PriorScale handle — ADR-0002 tiers on the main path (issue #73) ────────
+
+
+def test_kl_with_empirical_bayes_handle_matches_closed_form():
+    """With an EB handle, .kl equals the analytic KL at s = softplus(rho).
+
+    The EB scale is initialized so softplus(rho) == 0.7 exactly (softplus_inv
+    round-trip), making the closed-form reference deterministic.
+    Tolerance rel=1e-5: pure float32 arithmetic, no MC noise.
+    """
+    from dune_bayes.priors import PriorScale
+
+    torch.manual_seed(3)
+    handle = PriorScale(mode="empirical_bayes", scale=0.7)
+    layer = VariationalDense(IN, UNITS, prior_scale_handle=handle, kl_divisor=1.0)
+    x = torch.randn(BATCH, IN)
+    layer(x)
+
+    s = float(F.softplus(handle.rho).detach())
+    expected = _reference_kl(layer.kernel_loc, layer.kernel_rho, s)
+    expected += _reference_kl(layer.bias_loc, layer.bias_rho, s)
+    assert float(layer.kl.detach()) == pytest.approx(expected, rel=1e-5)
+
+
+def test_eb_handle_receives_gradient_through_dense_kl():
+    """The EB scale gets a gradient from the dense layer's KL — the REML analog.
+
+    ADR-0002: empirical Bayes learns the per-feature smoothness by optimizing
+    the prior scale through the ELBO; the KL term is where that gradient lives.
+    """
+    from dune_bayes.priors import PriorScale
+
+    torch.manual_seed(4)
+    handle = PriorScale(mode="empirical_bayes", scale=1.0)
+    layer = VariationalDense(IN, UNITS, prior_scale_handle=handle)
+    layer(torch.randn(BATCH, IN))
+
+    layer.kl.backward()
+    assert handle.rho.grad is not None
+    assert float(handle.rho.grad) != 0.0
+
+
+def test_shared_handle_hyperprior_counted_once_by_collect_kl():
+    """One handle shared by two layers: collect_kl counts its hyperprior KL once.
+
+    nn.Module.modules() deduplicates shared submodules, so the handle's stash
+    appears exactly once in the walk.  IG hyperprior is closed-form, so the
+    single-count claim is checked by exact arithmetic: total == kl₁ + kl₂ + kl_ps
+    (a double-count would add kl_ps twice).  rel=1e-5: float32, no MC noise in
+    the decomposition (the sampled s is already inside the stashed values).
+    """
+    from dune_bayes.priors import PriorScale
+
+    torch.manual_seed(5)
+    handle = PriorScale(mode="hierarchical", hyperprior="inverse_gamma")
+    model = nn.Sequential(
+        VariationalDense(IN, 8, prior_scale_handle=handle),
+        VariationalDense(8, UNITS, prior_scale_handle=handle),
+    )
+    model(torch.randn(BATCH, IN))
+
+    total = float(collect_kl(model).detach())
+    parts = (
+        float(model[0].kl.detach())
+        + float(model[1].kl.detach())
+        + float(handle.kl.detach())
+    )
+    assert float(handle.kl.detach()) > 0.0, "hierarchical hyperprior KL must be > 0"
+    assert total == pytest.approx(parts, rel=1e-5), (
+        "collect_kl must count the shared handle exactly once"
+    )
+
+
+def test_sample_dim_forward_shape():
+    """A (S, batch, in) input yields (S, batch, units) — issue 0027 / GitHub #80.
+
+    The leading dimension is the sample dimension: one dispatch emits S
+    posterior weight draws (sample-dimension reparameterization), the batched
+    unit the vectorized T-sweeps are built from.
+    """
+    torch.manual_seed(0)
+    layer = VariationalDense(IN, UNITS, validate_args=True)
+    S = 4
+    x = torch.randn(BATCH, IN).expand(S, BATCH, IN)
+    out = layer(x)
+    assert out.shape == (S, BATCH, UNITS)
+
+
+def test_sample_dim_slices_are_independent_draws():
+    """Identical inputs per sample slice produce differing outputs per slice.
+
+    The sample dimension must carry S *independent* weight draws — a single
+    draw broadcast S ways (the shape-compatible failure mode) would make all
+    slices identical. With softplus(_RHO_INIT) ≈ 0.05 posterior scale, two
+    independent draws coinciding to float32 equality has probability ~0.
+    """
+    torch.manual_seed(1)
+    layer = VariationalDense(IN, UNITS, validate_args=True)
+    S = 4
+    x = torch.randn(BATCH, IN).expand(S, BATCH, IN)
+    with torch.no_grad():
+        out = layer(x)
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s]), (
+            f"slice {s} equals slice 0 — one weight draw was broadcast across "
+            "the sample dimension instead of S independent draws"
+        )
+
+
+def test_sample_dim_draws_match_analytic_marginal():
+    """Mean/std across the sample dim converge to the analytic marginal.
+
+    For out = x @ W + b with W ~ N(loc, scale²) elementwise and
+    b ~ N(bias_loc, bias_scale²):
+        E[out]   = x @ loc + bias_loc
+        Var[out] = (x²) @ scale² + bias_scale²
+    — the same marginal the per-draw loop samples from, so this is the
+    MC-convergence form of the "variance consistent with the loop" claim.
+
+    Tolerances (MC noise, not float error): with S=4000, std_err of the mean
+    is σ/√S ≈ 0.05·|x|/63 per element — abs=0.02 gives ~10× headroom.  The
+    sample std estimate has rel error ≈ 1/√(2S) ≈ 1.1%; rel=0.15 is wide
+    enough to be stable under the fixed seed while catching a shared-draw
+    bug, which collapses the cross-sample std to 0.
+    """
+    torch.manual_seed(2)
+    layer = VariationalDense(IN, UNITS, validate_args=True)
+    S = 4000
+    x_base = torch.randn(BATCH, IN)
+    with torch.no_grad():
+        out = layer(x_base.expand(S, BATCH, IN))  # (S, BATCH, UNITS)
+
+        kernel_scale = F.softplus(layer.kernel_rho)
+        bias_scale = F.softplus(layer.bias_rho)
+        mean_ref = x_base @ layer.kernel_loc + layer.bias_loc
+        std_ref = torch.sqrt((x_base**2) @ kernel_scale**2 + bias_scale**2)
+
+    assert out.mean(dim=0) == pytest.approx(mean_ref.numpy(), abs=0.02)
+    assert out.std(dim=0) == pytest.approx(std_ref.numpy(), rel=0.15)
+
+
+def test_sample_dim_flipout_slices_are_independent_draws():
+    """The flipout estimator also draws fresh noise per sample slice.
+
+    Flipout samples pre-activations from their marginal, so per-slice
+    independence comes from randn_like on the (S, batch, units) mean — this
+    test pins that behavior against a future refactor sharing noise across S.
+    """
+    torch.manual_seed(3)
+    layer = VariationalDense(IN, UNITS, flipout=True, validate_args=True)
+    S = 4
+    x = torch.randn(BATCH, IN).expand(S, BATCH, IN)
+    with torch.no_grad():
+        out = layer(x)
+    assert out.shape == (S, BATCH, UNITS)
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s])
+
+
+def test_round_trip_with_prior_scale_config_max_delta_zero(tmp_path):
+    """config + state_dict round-trip restores a handle-carrying layer exactly."""
+    from dune_bayes.priors import PriorScale
+
+    torch.manual_seed(6)
+    handle = PriorScale(mode="empirical_bayes", scale=0.5, kl_divisor=64.0)
+    layer = VariationalDense(IN, UNITS, prior_scale_handle=handle, kl_divisor=64.0)
+    bundle_path = tmp_path / "layer_handle.pt"
+    torch.save(
+        {"config": layer.get_config(), "state_dict": layer.state_dict()}, bundle_path
+    )
+
+    bundle = torch.load(bundle_path, weights_only=True)
+    loaded = VariationalDense.from_config(bundle["config"])
+    loaded.load_state_dict(bundle["state_dict"])
+
+    sa, sb = layer.state_dict(), loaded.state_dict()
+    assert sa.keys() == sb.keys(), "state_dict key sets differ"
+    max_delta = max(float((sa[k] - sb[k]).abs().max()) for k in sa)
+    assert max_delta == 0.0, f"max|Δw| = {max_delta:.2e}"

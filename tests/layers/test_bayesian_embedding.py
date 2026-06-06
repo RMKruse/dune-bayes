@@ -14,8 +14,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers import BayesianEmbedding, collect_kl, set_kl_beta
-from neural_bamlss.priors import PriorScale
+from dune_bayes.layers import BayesianEmbedding, collect_kl, set_kl_beta
+from dune_bayes.priors import PriorScale
 
 NUM_EMBEDDINGS = 8
 EMBEDDING_DIM = 4
@@ -76,7 +76,7 @@ def _reference_embedding_kl(
 def test_kl_matches_closed_form_reference(embedding, idx):
     """After forward(), .kl equals analytic Gaussian–Gaussian KL.
 
-    PriorScale is fixed (scale=1.0), so prior_scale_handle.kl()==0 and
+    PriorScale is fixed (scale=1.0), so its hyperprior KL is zero and
     s is a deterministic tensor — no MC noise.  float32 arithmetic: rel=1e-5.
     """
     embedding(idx)
@@ -114,7 +114,7 @@ class _ModelWithEmbedding(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        from neural_bamlss.layers import VariationalDense
+        from dune_bayes.layers import VariationalDense
 
         self.embed = BayesianEmbedding(
             num_embeddings=NUM_EMBEDDINGS, embedding_dim=EMBEDDING_DIM
@@ -158,52 +158,64 @@ def test_set_kl_beta_propagates_through_composite_model(idx):
     assert float(model.dense.kl_beta) == pytest.approx(0.5)
 
 
-# ── 7. hierarchical PriorScale hyperprior KL is added to .kl ─────────────────
+# ── 7. hierarchical PriorScale hyperprior KL reaches collect_kl ──────────────
 
 
-def test_hierarchical_prior_scale_kl_included(idx):
-    """When PriorScale is hierarchical, its hyperprior KL is absorbed into .kl.
+def test_hierarchical_hyperprior_kl_reaches_collect_kl(idx):
+    """The hyperprior KL is stashed on the handle itself and found by collect_kl.
 
-    We verify this by comparing: .kl with a hierarchical handle > .kl with a
-    fixed handle of the same expected scale.  The hierarchical KL is strictly
-    larger because it adds the positive hyperprior term.
+    Since issue #73 the handle is a VariationalLayer: the embedding stashes only
+    its Gaussian–Gaussian KL, the handle stashes its own hyperprior KL, and
+    collect_kl over the embedding (which owns the handle as a submodule) sums
+    exactly the two.  rel=1e-5: float32 sum, no extra MC noise in the split.
     """
     torch.manual_seed(7)
-    ps_fixed = PriorScale(mode="fixed", scale=1.0)
-    emb_fixed = BayesianEmbedding(
+    ps = PriorScale(mode="hierarchical", scale=1.0, hyperprior="inverse_gamma")
+    emb = BayesianEmbedding(
         num_embeddings=NUM_EMBEDDINGS,
         embedding_dim=EMBEDDING_DIM,
-        prior_scale_handle=ps_fixed,
+        prior_scale_handle=ps,
+    )
+    emb(idx)
+
+    assert float(ps.kl.detach()) > 0.0, "hierarchical hyperprior KL should be > 0"
+    total = float(collect_kl(emb).detach())
+    assert total == pytest.approx(
+        float(emb.kl.detach()) + float(ps.kl.detach()), rel=1e-5
     )
 
-    # Copy identical loc/rho so the embedding KL base is the same.
-    ps_hierarchical = PriorScale(
-        mode="hierarchical", scale=1.0, hyperprior="inverse_gamma"
-    )
-    emb_hier = BayesianEmbedding(
-        num_embeddings=NUM_EMBEDDINGS,
-        embedding_dim=EMBEDDING_DIM,
-        prior_scale_handle=ps_hierarchical,
+
+def test_embedding_kl_excludes_hyperprior_no_double_count(idx):
+    """The embedding stash holds only the Gaussian–Gaussian KL — no hyperprior.
+
+    Regression for issue #73: before, the embedding added the handle's
+    hyperprior KL into its own stash; with the handle stashing it too that
+    would double-count.  Construction makes the check exact:
+
+      - rho_s = -20 → sigma_s = softplus(-20) ≈ 2e-9, loc_s = log(1.0) = 0,
+        so the sampled s == 1.0 to float32 precision (deterministic), and the
+        embedding KL has a closed-form reference at prior scale 1.0;
+      - alpha0 = 200 makes the hyperprior KL huge (lgamma(200) ≈ 857), so a
+        double-count would inflate the embedding stash catastrophically.
+
+    rel=1e-4: float32 arithmetic plus the ~1e-9 jitter in the sampled s.
+    """
+    ps = PriorScale(
+        mode="hierarchical", scale=1.0, hyperprior="inverse_gamma", alpha0=200.0
     )
     with torch.no_grad():
-        emb_hier.loc.copy_(emb_fixed.loc)
-        emb_hier.rho.copy_(emb_fixed.rho)
-
-    emb_fixed(idx)
-    emb_hier(idx)
-
-    # Hierarchical mode adds a non-zero hyperprior KL on top of the embedding KL.
-    ps_kl = float(ps_hierarchical.kl().detach())
-    assert ps_kl != pytest.approx(0.0, abs=1e-6), (
-        "hierarchical PriorScale KL should be non-zero"
+        ps.rho_s.fill_(-20.0)
+    emb = BayesianEmbedding(
+        num_embeddings=NUM_EMBEDDINGS,
+        embedding_dim=EMBEDDING_DIM,
+        prior_scale_handle=ps,
     )
-    # The stashed .kl for the hierarchical layer includes the hyperprior term.
-    # We check via ps_kl being non-zero (already asserted) and the hierarchical
-    # .kl differing from the fixed one by more than a small epsilon.
-    kl_fixed = float(emb_fixed.kl.detach())
-    kl_hier = float(emb_hier.kl.detach())
-    assert abs(kl_hier - kl_fixed) > 1e-3, (
-        "hierarchical .kl should differ from fixed .kl by the hyperprior KL"
+    emb(idx)
+
+    expected = _reference_embedding_kl(emb.loc, emb.rho, prior_scale=1.0)
+    assert float(emb.kl.detach()) == pytest.approx(expected, rel=1e-4), (
+        "embedding .kl must hold only the Gaussian–Gaussian KL "
+        "(hyperprior KL lives on the handle)"
     )
 
 
@@ -305,3 +317,56 @@ def test_variational_mean_converges_to_loc():
     assert mean_sample.numpy() == pytest.approx(expected, abs=0.05), (
         "variational embedding mean drifted from loc — posterior mean should equal loc"
     )
+
+
+# ── sample-dimension draws (issue 0027 / GitHub #80) ─────────────────────────
+
+
+def test_sample_dim_slices_are_independent_draws(embedding):
+    """An expanded (S, batch) idx yields S independent draws, not one broadcast.
+
+    The vectorized sweeps expand the index tensor along a leading sample
+    dimension; each slice must carry fresh embedding noise.  Identical idx
+    rows with one shared table draw would make all slices equal — the
+    independence violation issue 0027 forbids.
+    """
+    torch.manual_seed(7)
+    S = 4
+    idx = torch.randint(0, NUM_EMBEDDINGS, (BATCH,)).expand(S, BATCH)
+    with torch.no_grad():
+        out = embedding(idx)
+    assert out.shape == (S, BATCH, EMBEDDING_DIM)
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s]), (
+            f"slice {s} equals slice 0 — embedding draw broadcast across samples"
+        )
+
+
+def test_sample_dim_marginal_matches_posterior():
+    """Per-element draws follow N(loc[idx], softplus(rho)[idx]²) — MC convergence.
+
+    Local reparameterization (per-element fresh noise, the flipout analog)
+    must leave each element's marginal posterior exact; ELBO, WAIC pointwise
+    terms, and ribbon quantiles consume only these marginals.
+    Tolerances (MC noise): S=4000 draws; mean std_err ≈ 0.049/√4000 ≈ 8e-4,
+    abs=0.01 gives ~12× headroom.  Sample-std rel error ≈ 1/√(2S) ≈ 1.1%;
+    rel=0.15 is stable under the fixed seed and catches a shared-draw bug
+    (cross-sample std collapses to 0) or a wrong-scale bug.
+    """
+    torch.manual_seed(8)
+    ps = PriorScale(mode="fixed", scale=1.0)
+    layer = BayesianEmbedding(
+        num_embeddings=NUM_EMBEDDINGS,
+        embedding_dim=EMBEDDING_DIM,
+        prior_scale_handle=ps,
+        validate_args=True,
+    )
+    S = 4000
+    query = torch.tensor([0, 1, 2]).expand(S, 3)
+    with torch.no_grad():
+        out = layer(query)  # (S, 3, EMBEDDING_DIM)
+        loc_ref = layer.loc[query[0]]
+        scale_ref = torch.nn.functional.softplus(layer.rho)[query[0]]
+
+    assert out.mean(dim=0) == pytest.approx(loc_ref.numpy(), abs=0.01)
+    assert out.std(dim=0) == pytest.approx(scale_ref.numpy(), rel=0.15)

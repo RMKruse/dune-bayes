@@ -4,6 +4,7 @@ Four reference-test archetypes (CLAUDE.md):
   - Shape:       predictive_quantiles output keys and tensor shapes.
   - Reference:   lo/hi are correct tail quantiles; mid is the median.
   - Behavior:    credible interval is configurable; 50% CI narrower than 90%.
+  - Behavior:    seed= leaves the caller's global torch RNG state untouched.
   - Behavior:    plot_dist returns Axes with ribbon (PolyCollection) + scatter.
 """
 
@@ -46,7 +47,7 @@ def y():
 
 def test_predictive_quantiles_output_shape(predictive):
     """lo/mid/hi each have shape (n,) — one scalar quantile per observation."""
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     result = predictive_quantiles(predictive, seed=0)
     for key in ("lo", "mid", "hi"):
@@ -64,7 +65,7 @@ def test_interval_bounds_90(predictive):
     so they produce identical sample tensors → identical quantiles.
     atol=1e-5: float32 rounding in torch.quantile interpolation.
     """
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     # Reference: draw 5000 samples with seed=0.
     torch.manual_seed(0)
@@ -94,7 +95,7 @@ def test_mid_is_median_not_mean(predictive):
     Both reference and implementation draw 5000 samples from seed=0 →
     identical tensors → exact comparison (atol=1e-5 for float32 rounding).
     """
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     # Reference with seed=0 and n_samples=5000.
     torch.manual_seed(0)
@@ -124,7 +125,7 @@ def test_credible_interval_configurable(predictive):
     quantile levels differ.  The 50% band must be strictly narrower in all
     obs: hi_50 < hi_90 and lo_50 > lo_90 everywhere.
     """
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     r90 = predictive_quantiles(predictive, credible_interval=0.90, seed=0)
     r50 = predictive_quantiles(predictive, credible_interval=0.50, seed=0)
@@ -133,7 +134,32 @@ def test_credible_interval_configurable(predictive):
     assert (r50["lo"] > r90["lo"]).all(), "50% lower bound not above 90% lower bound"
 
 
-# ── 5: plot_dist returns Axes ──────────────────────────────────────────────────
+# ── 5: seed= does not clobber the caller's global RNG state ───────────────────
+
+
+def test_seeded_quantiles_preserve_global_rng_state(predictive):
+    """predictive_quantiles(seed=...) must not perturb the global torch RNG.
+
+    Seeding happens inside a forked RNG scope (torch.distributions has no
+    generator= hook on .sample()), so a draw before and after the call must
+    behave as if the call never touched the RNG.
+    """
+    from dune_bayes.plotting import predictive_quantiles
+
+    torch.manual_seed(123)
+    expected = torch.randn(4)  # what the global stream yields without the call
+
+    torch.manual_seed(123)
+    predictive_quantiles(predictive, seed=0)
+    after = torch.randn(4)  # same stream position despite the seeded call
+
+    # Exact equality: identical RNG state must give identical draws.
+    assert torch.equal(after, expected), (
+        "predictive_quantiles(seed=...) mutated the global torch RNG state"
+    )
+
+
+# ── 6: plot_dist returns Axes ──────────────────────────────────────────────────
 
 
 def test_plot_dist_returns_axes(predictive, y):
@@ -143,13 +169,13 @@ def test_plot_dist_returns_axes(predictive, y):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from neural_bamlss.plotting import plot_dist
+    from dune_bayes.plotting import plot_dist
 
     ax = plot_dist(predictive, y, seed=0)
     assert isinstance(ax, plt.Axes)
 
 
-# ── 6: Axes contains ribbon (PolyCollection) and scatter ──────────────────────
+# ── 7: Axes contains ribbon (PolyCollection) and scatter ──────────────────────
 
 
 def test_plot_dist_contains_ribbon_and_scatter(predictive, y):
@@ -162,7 +188,7 @@ def test_plot_dist_contains_ribbon_and_scatter(predictive, y):
     matplotlib.use("Agg")
     from matplotlib.collections import PathCollection, PolyCollection
 
-    from neural_bamlss.plotting import plot_dist
+    from dune_bayes.plotting import plot_dist
 
     ax = plot_dist(predictive, y, seed=0)
 
@@ -173,7 +199,7 @@ def test_plot_dist_contains_ribbon_and_scatter(predictive, y):
     assert len(scatter) >= 1, "no scatter of actual y values found"
 
 
-# ── 7: plot_dist accepts existing Axes ────────────────────────────────────────
+# ── 8: plot_dist accepts existing Axes ────────────────────────────────────────
 
 
 def test_plot_dist_accepts_existing_axes(predictive, y):
@@ -183,7 +209,7 @@ def test_plot_dist_accepts_existing_axes(predictive, y):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from neural_bamlss.plotting import plot_dist
+    from dune_bayes.plotting import plot_dist
 
     _, ax_in = plt.subplots()
     ax_out = plot_dist(predictive, y, ax=ax_in, seed=0)
