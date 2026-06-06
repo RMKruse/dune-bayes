@@ -30,12 +30,12 @@ class BaseFamily(ABC):
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
         # Only enforce on concrete (non-abstract) subclasses.
-        if not getattr(cls, "__abstractmethods__", None):
-            if not isinstance(getattr(cls, "param_count", None), int):
-                raise TypeError(
-                    f"{cls.__name__} must define 'param_count: int'"
-                    " as a class attribute"
-                )
+        if not getattr(cls, "__abstractmethods__", None) and not isinstance(
+            getattr(cls, "param_count", None), int
+        ):
+            raise TypeError(
+                f"{cls.__name__} must define 'param_count: int' as a class attribute"
+            )
 
     @abstractmethod
     def __call__(self, params: torch.Tensor) -> torch.distributions.Distribution:
