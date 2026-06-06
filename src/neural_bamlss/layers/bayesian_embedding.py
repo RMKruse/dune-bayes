@@ -11,12 +11,22 @@ A point-embedding fallback (mode="point") is available but not the default;
 it removes the per-level credible interval and the shrinkage behavior.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from neural_bamlss.layers.base import _RHO_INIT, VariationalLayer, gaussian_kl
-from neural_bamlss.priors.prior_scale import PriorScale
+
+if TYPE_CHECKING:
+    from neural_bamlss.priors.prior_scale import PriorScale
+
+# PriorScale imports stay local (TYPE_CHECKING + function bodies): PriorScale
+# subclasses VariationalLayer, so priors → layers/__init__ → this module is a
+# real cycle if PriorScale is needed at module-exec time (issue #73).
 
 # Small initialisation scale so the embedding table starts near zero.
 _LOC_INIT_STD = 0.01
@@ -57,6 +67,8 @@ class BayesianEmbedding(VariationalLayer):
         self.num_embeddings = int(num_embeddings)
         self.embedding_dim = int(embedding_dim)
         if prior_scale_handle is None:
+            from neural_bamlss.priors.prior_scale import PriorScale
+
             prior_scale_handle = PriorScale(mode="fixed", scale=1.0)
         self.prior_scale_handle = prior_scale_handle
         self.mode = mode
@@ -92,16 +104,13 @@ class BayesianEmbedding(VariationalLayer):
             out = sampled[idx]
 
             # Shared prior scale s from the per-feature PriorScale handle —
-            # passed as a tensor so its gradient path stays alive.
+            # passed as a tensor so its gradient path stays alive.  The handle
+            # stashes its own hyperprior KL on this call (issue #73); adding it
+            # here too would double-count it in collect_kl.
             s = self.prior_scale_handle()  # positive scalar tensor
 
             # KL[N(loc, scale²) ‖ N(0, s²)], summed over all (level, dim) pairs.
-            embedding_kl = gaussian_kl(self.loc, scale, s)
-
-            # Hyperprior KL from PriorScale (zero unless hierarchical mode).
-            ps_kl = self.prior_scale_handle.kl()
-
-            self._stash_kl(embedding_kl + ps_kl)
+            self._stash_kl(gaussian_kl(self.loc, scale, s))
         else:
             out = self.loc[idx]
             self.kl = torch.zeros(())
@@ -121,7 +130,9 @@ class BayesianEmbedding(VariationalLayer):
         }
 
     @classmethod
-    def from_config(cls, config: dict) -> "BayesianEmbedding":
+    def from_config(cls, config: dict) -> BayesianEmbedding:
+        from neural_bamlss.priors.prior_scale import PriorScale
+
         cfg = dict(config)
         ps = PriorScale.from_config(cfg.pop("prior_scale_config"))
         return cls(prior_scale_handle=ps, **cfg)
