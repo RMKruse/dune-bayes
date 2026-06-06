@@ -262,3 +262,98 @@ def test_flipout_vanilla_agree_in_expectation():
     assert mean_vanilla == pytest.approx(
         mean_flipout.numpy(), abs=0.05
     ), "flipout and vanilla means diverged — they must agree in expectation"
+
+
+# ── 9. PriorScale handle — ADR-0002 tiers on the main path (issue #73) ────────
+
+
+def test_kl_with_empirical_bayes_handle_matches_closed_form():
+    """With an EB handle, .kl equals the analytic KL at s = softplus(rho).
+
+    The EB scale is initialized so softplus(rho) == 0.7 exactly (softplus_inv
+    round-trip), making the closed-form reference deterministic.
+    Tolerance rel=1e-5: pure float32 arithmetic, no MC noise.
+    """
+    from neural_bamlss.priors import PriorScale
+
+    torch.manual_seed(3)
+    handle = PriorScale(mode="empirical_bayes", scale=0.7)
+    layer = VariationalDense(IN, UNITS, prior_scale_handle=handle, kl_divisor=1.0)
+    x = torch.randn(BATCH, IN)
+    layer(x)
+
+    s = float(F.softplus(handle.rho).detach())
+    expected = _reference_kl(layer.kernel_loc, layer.kernel_rho, s)
+    expected += _reference_kl(layer.bias_loc, layer.bias_rho, s)
+    assert float(layer.kl.detach()) == pytest.approx(expected, rel=1e-5)
+
+
+def test_eb_handle_receives_gradient_through_dense_kl():
+    """The EB scale gets a gradient from the dense layer's KL — the REML analog.
+
+    ADR-0002: empirical Bayes learns the per-feature smoothness by optimizing
+    the prior scale through the ELBO; the KL term is where that gradient lives.
+    """
+    from neural_bamlss.priors import PriorScale
+
+    torch.manual_seed(4)
+    handle = PriorScale(mode="empirical_bayes", scale=1.0)
+    layer = VariationalDense(IN, UNITS, prior_scale_handle=handle)
+    layer(torch.randn(BATCH, IN))
+
+    layer.kl.backward()
+    assert handle.rho.grad is not None
+    assert float(handle.rho.grad) != 0.0
+
+
+def test_shared_handle_hyperprior_counted_once_by_collect_kl():
+    """One handle shared by two layers: collect_kl counts its hyperprior KL once.
+
+    nn.Module.modules() deduplicates shared submodules, so the handle's stash
+    appears exactly once in the walk.  IG hyperprior is closed-form, so the
+    single-count claim is checked by exact arithmetic: total == kl₁ + kl₂ + kl_ps
+    (a double-count would add kl_ps twice).  rel=1e-5: float32, no MC noise in
+    the decomposition (the sampled s is already inside the stashed values).
+    """
+    from neural_bamlss.priors import PriorScale
+
+    torch.manual_seed(5)
+    handle = PriorScale(mode="hierarchical", hyperprior="inverse_gamma")
+    model = nn.Sequential(
+        VariationalDense(IN, 8, prior_scale_handle=handle),
+        VariationalDense(8, UNITS, prior_scale_handle=handle),
+    )
+    model(torch.randn(BATCH, IN))
+
+    total = float(collect_kl(model).detach())
+    parts = (
+        float(model[0].kl.detach())
+        + float(model[1].kl.detach())
+        + float(handle.kl.detach())
+    )
+    assert float(handle.kl.detach()) > 0.0, "hierarchical hyperprior KL must be > 0"
+    assert total == pytest.approx(parts, rel=1e-5), (
+        "collect_kl must count the shared handle exactly once"
+    )
+
+
+def test_round_trip_with_prior_scale_config_max_delta_zero(tmp_path):
+    """config + state_dict round-trip restores a handle-carrying layer exactly."""
+    from neural_bamlss.priors import PriorScale
+
+    torch.manual_seed(6)
+    handle = PriorScale(mode="empirical_bayes", scale=0.5, kl_divisor=64.0)
+    layer = VariationalDense(IN, UNITS, prior_scale_handle=handle, kl_divisor=64.0)
+    bundle_path = tmp_path / "layer_handle.pt"
+    torch.save(
+        {"config": layer.get_config(), "state_dict": layer.state_dict()}, bundle_path
+    )
+
+    bundle = torch.load(bundle_path, weights_only=True)
+    loaded = VariationalDense.from_config(bundle["config"])
+    loaded.load_state_dict(bundle["state_dict"])
+
+    sa, sb = layer.state_dict(), loaded.state_dict()
+    assert sa.keys() == sb.keys(), "state_dict key sets differ"
+    max_delta = max(float((sa[k] - sb[k]).abs().max()) for k in sa)
+    assert max_delta == 0.0, f"max|Δw| = {max_delta:.2e}"
