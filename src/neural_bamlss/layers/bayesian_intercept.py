@@ -52,13 +52,31 @@ class BayesianIntercept(VariationalLayer):
         else:
             self.register_parameter("rho", None)
 
-    def forward(self) -> torch.Tensor:
+    def forward(self, n_samples: int | None = None) -> torch.Tensor:
+        """Draw the intercept; optionally a batch of independent draws.
+
+        Args:
+            n_samples: When given, return (n_samples, units) with one fresh
+                posterior draw per row — the sample-dimension form used by the
+                vectorized T-sweeps (issue 0027 / GitHub #80). None (default)
+                keeps the single-draw (units,) training-path behavior.
+
+        Returns:
+            Tensor of shape (units,) or (n_samples, units).
+        """
         if self.mode == "variational":
             scale = F.softplus(self.rho)
-            sample = self.loc + scale * torch.randn_like(self.loc)
+            if n_samples is None:
+                noise = torch.randn_like(self.loc)
+            else:
+                # Fresh noise per sample row — never one draw broadcast S ways.
+                noise = torch.randn(
+                    n_samples, self.units, device=self.loc.device, dtype=self.loc.dtype
+                )
+            sample = self.loc + scale * noise
             self._stash_kl(gaussian_kl(self.loc, scale, self.prior_scale))
         else:
-            sample = self.loc
+            sample = self.loc if n_samples is None else self.loc.expand(n_samples, -1)
             self.kl = torch.zeros(())
         return sample
 
