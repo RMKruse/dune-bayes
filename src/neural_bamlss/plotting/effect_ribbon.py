@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from neural_bamlss.utils import to_numpy
+
 
 def ribbon_quantiles(
     samples: torch.Tensor,
@@ -87,10 +89,7 @@ def plot_effect_ribbon(
     mid = quants["mid"][:, param_idx].numpy()
     hi = quants["hi"][:, param_idx].numpy()
 
-    if isinstance(x_values, torch.Tensor):
-        x = x_values.numpy()
-    else:
-        x = np.asarray(x_values)
+    x = to_numpy(x_values)
 
     # Sort along x for a smooth visual (sample_effects gives unordered n rows).
     order = np.argsort(x)
