@@ -317,3 +317,56 @@ def test_variational_mean_converges_to_loc():
     assert mean_sample.numpy() == pytest.approx(expected, abs=0.05), (
         "variational embedding mean drifted from loc — posterior mean should equal loc"
     )
+
+
+# ── sample-dimension draws (issue 0027 / GitHub #80) ─────────────────────────
+
+
+def test_sample_dim_slices_are_independent_draws(embedding):
+    """An expanded (S, batch) idx yields S independent draws, not one broadcast.
+
+    The vectorized sweeps expand the index tensor along a leading sample
+    dimension; each slice must carry fresh embedding noise.  Identical idx
+    rows with one shared table draw would make all slices equal — the
+    independence violation issue 0027 forbids.
+    """
+    torch.manual_seed(7)
+    S = 4
+    idx = torch.randint(0, NUM_EMBEDDINGS, (BATCH,)).expand(S, BATCH)
+    with torch.no_grad():
+        out = embedding(idx)
+    assert out.shape == (S, BATCH, EMBEDDING_DIM)
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s]), (
+            f"slice {s} equals slice 0 — embedding draw broadcast across samples"
+        )
+
+
+def test_sample_dim_marginal_matches_posterior():
+    """Per-element draws follow N(loc[idx], softplus(rho)[idx]²) — MC convergence.
+
+    Local reparameterization (per-element fresh noise, the flipout analog)
+    must leave each element's marginal posterior exact; ELBO, WAIC pointwise
+    terms, and ribbon quantiles consume only these marginals.
+    Tolerances (MC noise): S=4000 draws; mean std_err ≈ 0.049/√4000 ≈ 8e-4,
+    abs=0.01 gives ~12× headroom.  Sample-std rel error ≈ 1/√(2S) ≈ 1.1%;
+    rel=0.15 is stable under the fixed seed and catches a shared-draw bug
+    (cross-sample std collapses to 0) or a wrong-scale bug.
+    """
+    torch.manual_seed(8)
+    ps = PriorScale(mode="fixed", scale=1.0)
+    layer = BayesianEmbedding(
+        num_embeddings=NUM_EMBEDDINGS,
+        embedding_dim=EMBEDDING_DIM,
+        prior_scale_handle=ps,
+        validate_args=True,
+    )
+    S = 4000
+    query = torch.tensor([0, 1, 2]).expand(S, 3)
+    with torch.no_grad():
+        out = layer(query)  # (S, 3, EMBEDDING_DIM)
+        loc_ref = layer.loc[query[0]]
+        scale_ref = torch.nn.functional.softplus(layer.rho)[query[0]]
+
+    assert out.mean(dim=0) == pytest.approx(loc_ref.numpy(), abs=0.01)
+    assert out.std(dim=0) == pytest.approx(scale_ref.numpy(), rel=0.15)
