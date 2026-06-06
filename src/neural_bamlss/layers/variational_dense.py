@@ -108,7 +108,24 @@ class VariationalDense(VariationalLayer):
         x: torch.Tensor,
         kernel_scale: torch.Tensor,
     ) -> torch.Tensor:
-        """Global reparameterization: one weight-matrix sample per forward pass."""
+        """Global reparameterization: one weight-matrix sample per forward pass.
+
+        With a sample-dimension input (S, batch, in) — issue 0027 / GitHub #80 —
+        S independent kernels are drawn in one shot and applied as a single
+        batched matmul, so the T-sweep workhorses pay one dispatch per chunk
+        instead of one per draw.  Noise is fresh per sample slice, never one
+        draw broadcast S ways (the statistical-semantics constraint).
+        """
+        if x.dim() == 3:
+            noise = torch.randn(
+                x.shape[0],
+                self.in_features,
+                self.units,
+                device=x.device,
+                dtype=x.dtype,
+            )
+            kernel = self.kernel_loc + kernel_scale * noise  # (S, in, units)
+            return x @ kernel  # batched matmul → (S, batch, units)
         kernel = self.kernel_loc + kernel_scale * torch.randn_like(self.kernel_loc)
         return x @ kernel
 
@@ -153,7 +170,16 @@ class VariationalDense(VariationalLayer):
 
         if self.use_bias:
             bias_scale = F.softplus(self.bias_rho)
-            bias = self.bias_loc + bias_scale * torch.randn_like(self.bias_loc)
+            if out.dim() == 3:
+                # Sample-dimension pass: the bias is part of the weight draw,
+                # so it too must be fresh per sample slice (S, 1, units) —
+                # broadcast over the batch dim only, never over samples.
+                bias_noise = torch.randn(
+                    out.shape[0], 1, self.units, device=out.device, dtype=out.dtype
+                )
+            else:
+                bias_noise = torch.randn_like(self.bias_loc)
+            bias = self.bias_loc + bias_scale * bias_noise
             out = out + bias
             kl = kl + gaussian_kl(self.bias_loc, bias_scale, prior)
 
