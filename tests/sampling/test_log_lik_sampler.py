@@ -277,3 +277,80 @@ def test_interaction_model_posterior_predictive(interaction_model, interaction_x
     predictive = interaction_model.sample_posterior_predictive(interaction_x, T=10)
     assert isinstance(predictive, torch.distributions.MixtureSameFamily)
     assert predictive.batch_shape == (N_OBS,)
+
+
+# ── 10: Vectorized sweep — chunking over T (issue 0027 / GitHub #80) ──────────
+
+
+def test_draw_predictive_chunked_full_t_and_independent(model, data_x, family):
+    """chunk_size < T still yields (T, n, param_count) summed_samples with every
+    draw independent (incl. across chunk boundaries) and an (n,)-batch mixture.
+
+    chunk_size is the internal memory knob (issue 0027): draws are batched per
+    dispatch and concatenated over T. Identical draws anywhere would mean one
+    posterior sample was broadcast instead of freshly drawn.
+    """
+    torch.manual_seed(31)
+    T, chunk = 10, 4  # chunks of 4, 4, 2 — exercises the ragged tail
+    draws = draw_predictive(model, data_x, T=T, chunk_size=chunk)
+    assert draws.summed_samples.shape == (T, N_OBS, family.param_count)
+    assert draws.predictive.batch_shape == (N_OBS,)
+    for t in range(1, T):
+        assert not torch.equal(draws.summed_samples[0], draws.summed_samples[t]), (
+            f"draw {t} equals draw 0 — broadcast instead of independent draws"
+        )
+
+
+def test_pointwise_log_lik_matches_loop_reference(model, data_x, data_y, family):
+    """pointwise_log_lik equals a per-draw loop given identical summed_samples.
+
+    Deterministic given the draws — no MC noise. The reference inlines the
+    pre-issue-0027 loop: score each (n, param_count) slice through the family,
+    cast to float64, stack. Tolerance atol=1e-6 is pure float32 arithmetic
+    headroom (broadcast vs per-slice elementwise kernels are bitwise-identical
+    in practice; the atol guards against kernel-order variation only).
+    """
+    torch.manual_seed(33)
+    T = 20
+    draws = draw_predictive(model, data_x, T=T)
+    ll = pointwise_log_lik(model, draws.summed_samples, data_y)
+
+    with torch.no_grad():
+        ref = torch.stack(
+            [
+                family(draws.summed_samples[t]).log_prob(data_y).to(torch.float64)
+                for t in range(T)
+            ],
+            dim=0,
+        )
+
+    assert ll.shape == ref.shape == (T, N_OBS)
+    assert torch.allclose(ll, ref, atol=1e-6, rtol=0.0)
+
+
+def test_draw_predictive_with_embedding_net(data_y, family):
+    """A categorical random-effect formula sweeps vectorized like dense nets.
+
+    BayesianEmbedding draws per-element local-reparameterization noise
+    (issue 0027), so the expanded index tensor yields T independent draws —
+    same shape/independence contract as the dense path.
+    """
+    from neural_bamlss.layers import BayesianEmbedding
+
+    torch.manual_seed(34)
+    formula = {
+        "group": BayesianEmbedding(
+            num_embeddings=4, embedding_dim=family.param_count, kl_divisor=N_OBS
+        )
+    }
+    emb_model = BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
+    X = {"group": torch.randint(0, 4, (N_OBS,))}
+
+    T = 10
+    draws = draw_predictive(emb_model, X, T=T, chunk_size=4)
+    ll = pointwise_log_lik(emb_model, draws.summed_samples, data_y)
+    assert draws.summed_samples.shape == (T, N_OBS, family.param_count)
+    assert ll.shape == (T, N_OBS)
+    assert torch.isfinite(ll).all()
+    for t in range(1, T):
+        assert not torch.equal(draws.summed_samples[0], draws.summed_samples[t])

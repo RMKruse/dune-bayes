@@ -210,10 +210,19 @@ class BayesianNAMLSS(nn.Module):
                 )
             )
             stacked = stacked * mask * len(contribs) / mask.sum().clamp(min=1.0)
+        summed = stacked.sum(dim=0)
         # Intercept is added outside feature dropout: it is the overall level,
-        # not a feature contribution. (units,) broadcasts over the batch dim.
-        intercept: torch.Tensor = self.intercept()
-        return stacked.sum(dim=0) + intercept  # (batch, param_count)
+        # not a feature contribution. On a 2-D pass (units,) broadcasts over
+        # the batch dim. On a sample-dimension pass (issue 0027 / GitHub #80)
+        # the intercept is part of each posterior draw, so it must be fresh
+        # per sample slice: (S, 1, units) broadcasts over batch only.
+        if summed.dim() == 3:
+            intercept: torch.Tensor = self.intercept(
+                n_samples=int(summed.shape[0])
+            ).unsqueeze(1)
+        else:
+            intercept = self.intercept()
+        return summed + intercept  # (batch, param_count) or (S, batch, param_count)
 
     def forward(self, X: dict[str, torch.Tensor]) -> torch.distributions.Distribution:
         """Single stochastic forward pass.

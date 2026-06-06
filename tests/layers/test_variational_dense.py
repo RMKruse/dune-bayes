@@ -338,6 +338,92 @@ def test_shared_handle_hyperprior_counted_once_by_collect_kl():
     )
 
 
+def test_sample_dim_forward_shape():
+    """A (S, batch, in) input yields (S, batch, units) — issue 0027 / GitHub #80.
+
+    The leading dimension is the sample dimension: one dispatch emits S
+    posterior weight draws (sample-dimension reparameterization), the batched
+    unit the vectorized T-sweeps are built from.
+    """
+    torch.manual_seed(0)
+    layer = VariationalDense(IN, UNITS, validate_args=True)
+    S = 4
+    x = torch.randn(BATCH, IN).expand(S, BATCH, IN)
+    out = layer(x)
+    assert out.shape == (S, BATCH, UNITS)
+
+
+def test_sample_dim_slices_are_independent_draws():
+    """Identical inputs per sample slice produce differing outputs per slice.
+
+    The sample dimension must carry S *independent* weight draws — a single
+    draw broadcast S ways (the shape-compatible failure mode) would make all
+    slices identical. With softplus(_RHO_INIT) ≈ 0.05 posterior scale, two
+    independent draws coinciding to float32 equality has probability ~0.
+    """
+    torch.manual_seed(1)
+    layer = VariationalDense(IN, UNITS, validate_args=True)
+    S = 4
+    x = torch.randn(BATCH, IN).expand(S, BATCH, IN)
+    with torch.no_grad():
+        out = layer(x)
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s]), (
+            f"slice {s} equals slice 0 — one weight draw was broadcast across "
+            "the sample dimension instead of S independent draws"
+        )
+
+
+def test_sample_dim_draws_match_analytic_marginal():
+    """Mean/std across the sample dim converge to the analytic marginal.
+
+    For out = x @ W + b with W ~ N(loc, scale²) elementwise and
+    b ~ N(bias_loc, bias_scale²):
+        E[out]   = x @ loc + bias_loc
+        Var[out] = (x²) @ scale² + bias_scale²
+    — the same marginal the per-draw loop samples from, so this is the
+    MC-convergence form of the "variance consistent with the loop" claim.
+
+    Tolerances (MC noise, not float error): with S=4000, std_err of the mean
+    is σ/√S ≈ 0.05·|x|/63 per element — abs=0.02 gives ~10× headroom.  The
+    sample std estimate has rel error ≈ 1/√(2S) ≈ 1.1%; rel=0.15 is wide
+    enough to be stable under the fixed seed while catching a shared-draw
+    bug, which collapses the cross-sample std to 0.
+    """
+    torch.manual_seed(2)
+    layer = VariationalDense(IN, UNITS, validate_args=True)
+    S = 4000
+    x_base = torch.randn(BATCH, IN)
+    with torch.no_grad():
+        out = layer(x_base.expand(S, BATCH, IN))  # (S, BATCH, UNITS)
+
+        kernel_scale = F.softplus(layer.kernel_rho)
+        bias_scale = F.softplus(layer.bias_rho)
+        mean_ref = x_base @ layer.kernel_loc + layer.bias_loc
+        std_ref = torch.sqrt((x_base**2) @ kernel_scale**2 + bias_scale**2)
+
+    assert out.mean(dim=0) == pytest.approx(mean_ref.numpy(), abs=0.02)
+    assert out.std(dim=0) == pytest.approx(std_ref.numpy(), rel=0.15)
+
+
+def test_sample_dim_flipout_slices_are_independent_draws():
+    """The flipout estimator also draws fresh noise per sample slice.
+
+    Flipout samples pre-activations from their marginal, so per-slice
+    independence comes from randn_like on the (S, batch, units) mean — this
+    test pins that behavior against a future refactor sharing noise across S.
+    """
+    torch.manual_seed(3)
+    layer = VariationalDense(IN, UNITS, flipout=True, validate_args=True)
+    S = 4
+    x = torch.randn(BATCH, IN).expand(S, BATCH, IN)
+    with torch.no_grad():
+        out = layer(x)
+    assert out.shape == (S, BATCH, UNITS)
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s])
+
+
 def test_round_trip_with_prior_scale_config_max_delta_zero(tmp_path):
     """config + state_dict round-trip restores a handle-carrying layer exactly."""
     from neural_bamlss.priors import PriorScale

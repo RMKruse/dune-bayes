@@ -230,3 +230,33 @@ def test_variational_mean_converges_to_loc():
     assert mean_sample == pytest.approx(layer.loc.detach().numpy(), abs=0.05), (
         "variational intercept mean drifted from loc — posterior mean should equal loc"
     )
+
+
+# ── sample-dimension draws (issue 0027 / GitHub #80) ─────────────────────────
+
+
+def test_sample_dim_shape_and_independence(intercept):
+    """n_samples=S returns (S, units) with S independent intercept draws.
+
+    The vectorized predict_params sweep needs a fresh intercept per posterior
+    draw — a single draw broadcast S ways would understate epistemic spread.
+    Two independent float32 draws coinciding exactly has probability ~0.
+    """
+    S = 4
+    with torch.no_grad():
+        out = intercept(n_samples=S)
+    assert out.shape == (S, UNITS)
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s]), (
+            f"slice {s} equals slice 0 — intercept draw broadcast across samples"
+        )
+
+
+def test_sample_dim_point_mode_expands_loc():
+    """Point mode under n_samples returns loc replicated — deterministic, no KL."""
+    point = BayesianIntercept(units=UNITS, mode="point")
+    with torch.no_grad():
+        out = point(n_samples=4)
+    assert out.shape == (4, UNITS)
+    assert torch.equal(out, point.loc.detach().expand(4, UNITS))
+    assert float(point.kl) == 0.0
