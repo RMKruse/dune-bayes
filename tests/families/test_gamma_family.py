@@ -55,5 +55,5 @@ class TestGammaFamilyContract:
         family_strict = GammaFamily(validate_args=True)
         params = torch.tensor([[1.0, 1.0]])
         y_neg = torch.tensor([-1.0])
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             family_strict.log_prob(params, y_neg)
