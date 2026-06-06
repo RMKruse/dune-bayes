@@ -1,12 +1,14 @@
 # Context: dune-bayes
 
-**DUNE — Distributional Uncertainty in Neural-additive Estimation**, the
-neural analog of the **BAMLSS** R package (Bayesian Additive Models for
-Location, Scale and Shape). It is being built by taking the `NAMpy` package
-(deterministic interpretable additive distributional-regression models) and
-replacing the deterministic feature networks with **Bayesian** feature networks,
-so that each feature's effect on each distributional parameter carries epistemic
-uncertainty.
+**DUNE — Distributional Uncertainty in Neural-additive Estimation** builds on
+the **NAMLSS** framework ([Thielmann et al., 2024](https://proceedings.mlr.press/v238/frederik-thielmann24a.html)
+— Neural Additive Models for Location Scale and Shape) and makes it Bayesian.
+It is being built by taking the `NAMpy` package (the deterministic NAMLSS
+reference implementation) and replacing the deterministic feature networks
+with **Bayesian** feature networks, so that each feature's effect on each
+distributional parameter carries epistemic uncertainty. The Bayesian treatment
+of distributional regression follows the spirit of the **BAMLSS** R package
+(Bayesian Additive Models for Location, Scale and Shape).
 
 > **Compute backend (ADR-0006).** The package targets **PyTorch**. NAMpy was
 > written on TensorFlow / Keras 2 / TensorFlow-Probability (TFP); that stack is

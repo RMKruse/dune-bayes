@@ -4,12 +4,15 @@ Bayesian additive models for location, scale, and shape — neural shape
 functions with mean-field variational inference, in PyTorch. Distributed
 as the `dune-bayes` package (`import dune_bayes`).
 
-`dune-bayes` is the neural analog of the
-[BAMLSS](https://cran.r-project.org/package=bamlss) R package. Each feature
-gets its own small neural network (a *shape function*) that contributes to
-**every parameter** of a response distribution (location *and* scale *and*
-shape), and the network weights carry a variational posterior — so every
-feature effect comes with a credible band, not just a point curve.
+`dune-bayes` builds on the NAMLSS framework
+([Thielmann et al., 2024](https://proceedings.mlr.press/v238/frederik-thielmann24a.html))
+and makes it Bayesian. As in NAMLSS, each feature gets its own small neural
+network (a *shape function*) that contributes to **every parameter** of a
+response distribution (location *and* scale *and* shape); DUNE additionally
+puts a variational posterior on the network weights — so every feature effect
+comes with a credible band, not just a point curve. The Bayesian treatment of
+distributional regression follows the spirit of the
+[BAMLSS](https://cran.r-project.org/package=bamlss) R package.
 
 Three goals, in priority order:
 
@@ -77,8 +80,8 @@ Shape functions available in formulas: `BayesianMLP` (fully variational),
 `NeuralLinearMLP` (deterministic hidden layers, variational output — cheaper),
 and the deterministic baselines `MLP` and `ResNet`. Interactions are joint
 nets over multiple inputs (`BayesianMLP(x1):BayesianMLP(x2)`); categorical
-features become Bayesian embeddings — the neural analog of a BAMLSS random
-effect, with partial pooling of rare levels. Families shipped so far:
+features become Bayesian embeddings — the neural analog of a random effect,
+with partial pooling of rare levels. Families shipped so far:
 `NormalFamily`, `StudentTFamily`, `GammaFamily`.
 
 ## Documentation
@@ -93,7 +96,15 @@ effect, with partial pooling of rare levels. Families shipped so far:
 ## Citing
 
 There is no dune-bayes paper yet. If you use the package, please cite the
-repository, and the BAMLSS framework it builds on:
+repository, and the NAMLSS framework it builds on:
+
+> Thielmann, A. F., Kruse, R.-M., Kneib, T., & Säfken, B. (2024). Neural
+> additive models for location scale and shape: A framework for interpretable
+> neural regression beyond the mean. *Proceedings of the 27th International
+> Conference on Artificial Intelligence and Statistics (AISTATS)*, PMLR
+> 238:1783–1791.
+
+The Bayesian distributional-regression methodology it draws on:
 
 > Umlauf, N., Klein, N., & Zeileis, A. (2018). BAMLSS: Bayesian additive
 > models for location, scale, and shape (and beyond). *Journal of
