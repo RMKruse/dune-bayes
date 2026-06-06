@@ -23,8 +23,7 @@ import pandas as pd
 import torch
 import torch.utils.data
 
-# Single named epsilon constant (CLAUDE.md numerical rules — never bare divisions).
-_EPS_F32: float = 1e-6
+from neural_bamlss.utils import EPS
 
 
 class _FeatureDictDataset(torch.utils.data.Dataset):
@@ -109,10 +108,10 @@ class _FeatureScaler:
         if self.method == "standard":
             self._loc = float(arr.mean())
             # EPS floor: constant features get scale=1 (pass-through after centering)
-            self._scale = float(max(arr.std(), _EPS_F32))
+            self._scale = float(max(arr.std(), EPS))
         else:
             self._loc = float(arr.min())
-            self._scale = float(max(arr.max() - arr.min(), _EPS_F32))
+            self._scale = float(max(arr.max() - arr.min(), EPS))
 
     def transform(self, arr: np.ndarray) -> np.ndarray:
         return (arr - self._loc) / self._scale
