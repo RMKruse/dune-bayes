@@ -62,12 +62,12 @@ import time
 
 import torch
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.sampling.effect_sampler import sample_effects
-from neural_bamlss.sampling.log_lik_sampler import draw_predictive, pointwise_log_lik
-from neural_bamlss.shapes import BayesianMLP
-from neural_bamlss.utils import eval_mode, seed_everything
+from dune_bayes.families import NormalFamily
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.sampling.effect_sampler import sample_effects
+from dune_bayes.sampling.log_lik_sampler import draw_predictive, pointwise_log_lik
+from dune_bayes.shapes import BayesianMLP
+from dune_bayes.utils import eval_mode, seed_everything
 
 
 def parse_args() -> argparse.Namespace:

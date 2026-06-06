@@ -11,8 +11,8 @@ import pytest
 import torch
 import torch.nn as nn
 
-from neural_bamlss.layers import collect_kl
-from neural_bamlss.shapes import BayesianMLP, ShapeFunctionRegistry
+from dune_bayes.layers import collect_kl
+from dune_bayes.shapes import BayesianMLP, ShapeFunctionRegistry
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 

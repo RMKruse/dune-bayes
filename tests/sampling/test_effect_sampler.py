@@ -12,10 +12,10 @@ import math
 import pytest
 import torch
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.sampling import T_PREDICT, sample_effects
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.sampling import T_PREDICT, sample_effects
+from dune_bayes.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
 

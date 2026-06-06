@@ -7,9 +7,9 @@ parsed structure, built dict contents, public constructor attributes.
 
 import pytest
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.formula import build_formula, parse_formula
-from neural_bamlss.shapes import BayesianMLP, NeuralLinearMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.formula import build_formula, parse_formula
+from dune_bayes.shapes import BayesianMLP, NeuralLinearMLP
 
 # ── single-term parse: response capture + registry resolution ─────────────────
 

@@ -12,10 +12,10 @@ import pytest
 import torch
 import torch.nn as nn
 
-from neural_bamlss.layers import collect_kl
-from neural_bamlss.layers.variational_dense import VariationalDense
-from neural_bamlss.shapes import ShapeFunctionRegistry
-from neural_bamlss.shapes.deterministic_mlp import DeterministicMLP
+from dune_bayes.layers import collect_kl
+from dune_bayes.layers.variational_dense import VariationalDense
+from dune_bayes.shapes import ShapeFunctionRegistry
+from dune_bayes.shapes.deterministic_mlp import DeterministicMLP
 
 IN, PARAM_COUNT, BATCH = 3, 2, 8
 

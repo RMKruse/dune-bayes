@@ -50,7 +50,7 @@ def test_joint_bayesian_mlp_shape():
     A Bayesian interaction is just a BayesianMLP with a 2-feature input;
     no new machinery is needed (ADR-0005, issue 0013).
     """
-    from neural_bamlss.shapes.bayesian_mlp import BayesianMLP
+    from dune_bayes.shapes.bayesian_mlp import BayesianMLP
 
     net = BayesianMLP(in_features=2, param_count=P, hidden_dims=[8], validate_args=True)
     x = torch.randn(N, 2)
@@ -67,10 +67,10 @@ def test_effect_sampler_joint_net():
     The net receives a (n, 2) input tensor (the concatenated interaction
     features); sample_effects is agnostic to in_features.
     """
-    from neural_bamlss.families.normal import NormalFamily
-    from neural_bamlss.model import BayesianNAMLSS
-    from neural_bamlss.sampling.effect_sampler import sample_effects
-    from neural_bamlss.shapes.bayesian_mlp import BayesianMLP
+    from dune_bayes.families.normal import NormalFamily
+    from dune_bayes.model import BayesianNAMLSS
+    from dune_bayes.sampling.effect_sampler import sample_effects
+    from dune_bayes.shapes.bayesian_mlp import BayesianMLP
 
     net = BayesianMLP(in_features=2, param_count=P, hidden_dims=[8], validate_args=True)
     model = BayesianNAMLSS(formula={"x1x2": net}, family=NormalFamily())
@@ -90,7 +90,7 @@ def test_effect_sampler_joint_net():
 
 def test_surface_stats_keys_and_shape(random_samples):
     """surface_stats returns dict with 'mean' and 'sd', each [n, param_count]."""
-    from neural_bamlss.plotting.interaction_surface import surface_stats
+    from dune_bayes.plotting.interaction_surface import surface_stats
 
     result = surface_stats(random_samples)
 
@@ -107,7 +107,7 @@ def test_surface_stats_keys_and_shape(random_samples):
 
 def test_surface_stats_sd_nonnegative(random_samples):
     """Epistemic SD is non-negative everywhere (std is always ≥ 0)."""
-    from neural_bamlss.plotting.interaction_surface import surface_stats
+    from dune_bayes.plotting.interaction_surface import surface_stats
 
     result = surface_stats(random_samples)
     assert result["sd"].min().item() >= 0.0, (
@@ -123,7 +123,7 @@ def test_surface_stats_mean_correctness(random_samples):
 
     atol=1e-5: pure float32 arithmetic, no MC noise.
     """
-    from neural_bamlss.plotting.interaction_surface import surface_stats
+    from dune_bayes.plotting.interaction_surface import surface_stats
 
     result = surface_stats(random_samples)
     expected = random_samples.float().mean(dim=0)
@@ -141,7 +141,7 @@ def test_surface_stats_sd_correctness(random_samples):
 
     atol=1e-5: pure float32 arithmetic, no MC noise.
     """
-    from neural_bamlss.plotting.interaction_surface import surface_stats
+    from dune_bayes.plotting.interaction_surface import surface_stats
 
     result = surface_stats(random_samples)
     expected = random_samples.float().std(dim=0)
@@ -161,7 +161,7 @@ def test_plot_interaction_surface_returns_figure(random_samples, x1_x2):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from neural_bamlss.plotting.interaction_surface import plot_interaction_surface
+    from dune_bayes.plotting.interaction_surface import plot_interaction_surface
 
     x1, x2 = x1_x2
     fig = plot_interaction_surface(random_samples, x1, x2)
@@ -177,7 +177,7 @@ def test_plot_has_two_axes(random_samples, x1_x2):
 
     matplotlib.use("Agg")
 
-    from neural_bamlss.plotting.interaction_surface import plot_interaction_surface
+    from dune_bayes.plotting.interaction_surface import plot_interaction_surface
 
     x1, x2 = x1_x2
     fig = plot_interaction_surface(random_samples, x1, x2)
@@ -196,7 +196,7 @@ def test_plot_axes_have_collections(random_samples, x1_x2):
 
     matplotlib.use("Agg")
 
-    from neural_bamlss.plotting.interaction_surface import plot_interaction_surface
+    from dune_bayes.plotting.interaction_surface import plot_interaction_surface
 
     x1, x2 = x1_x2
     fig = plot_interaction_surface(random_samples, x1, x2)
@@ -219,7 +219,7 @@ def test_plot_feature_names_as_labels(random_samples, x1_x2):
 
     matplotlib.use("Agg")
 
-    from neural_bamlss.plotting.interaction_surface import plot_interaction_surface
+    from dune_bayes.plotting.interaction_surface import plot_interaction_surface
 
     x1, x2 = x1_x2
     fig = plot_interaction_surface(

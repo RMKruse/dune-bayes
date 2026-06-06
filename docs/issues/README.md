@@ -1,4 +1,4 @@
-# neural-bamlss issues
+# dune-bayes issues
 
 > **Backend superseded (ADR-0006, 2026-06-03).** These slices were written against
 > the TensorFlow / Keras 2 / TFP stack; the package now targets **PyTorch** (JAX/
@@ -13,7 +13,7 @@ Tracer-bullet vertical slices for the PRD in `docs/prd/0001-bayesian-feature-net
 Each slice cuts end-to-end (atom → shape function → model → output → tests) and is
 verifiable on its own. All slices are AFK (every design decision is locked in ADR-0001…0006).
 
-Issues are also published on GitHub (`RMKruse/neural-bamlss`): PRD = #1, slices = #2–#16,
+Issues are also published on GitHub (`RMKruse/dune-bayes`): PRD = #1, slices = #2–#16,
 epics = #17–#20. GitHub number = `slice number + 1`.
 
 ## Epics

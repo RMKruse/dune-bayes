@@ -8,7 +8,7 @@ Accepted
 
 ## Context
 
-Goal #2 (priors as principled regularization) and the "neural-BAMLSS" identity
+Goal #2 (priors as principled regularization) and the "neural analog of BAMLSS" identity
 hinge on how the weight priors of Bayesian shape functions are specified. A
 classical GAM's smoothness penalty `λ βᵀ S β` is exactly a Gaussian prior on the
 coefficients with variance ∝ 1/λ; estimating the smoothing parameter λ *is*

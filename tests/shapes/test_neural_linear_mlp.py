@@ -12,8 +12,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers import VariationalDense, collect_kl
-from neural_bamlss.shapes import NeuralLinearMLP, ShapeFunctionRegistry
+from dune_bayes.layers import VariationalDense, collect_kl
+from dune_bayes.shapes import NeuralLinearMLP, ShapeFunctionRegistry
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -112,7 +112,7 @@ def test_kl_strictly_less_than_bayesian_mlp(x):
     BayesianMLP with hidden_dims=[8, 8] has 3 VariationalDense layers;
     NeuralLinearMLP has only 1 — so its total KL must be strictly smaller.
     """
-    from neural_bamlss.shapes import BayesianMLP
+    from dune_bayes.shapes import BayesianMLP
 
     torch.manual_seed(0)
     fully_var = BayesianMLP(IN, PARAM_COUNT, hidden_dims=[8, 8], validate_args=True)

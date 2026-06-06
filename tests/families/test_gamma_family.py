@@ -4,7 +4,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from neural_bamlss.families import GammaFamily
+from dune_bayes.families import GammaFamily
 
 
 @pytest.fixture

@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers import (
+from dune_bayes.layers import (
     BayesianIntercept,
     VariationalDense,
     collect_kl,

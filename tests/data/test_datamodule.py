@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 import torch
 
-from neural_bamlss.data import DataModule
+from dune_bayes.data import DataModule
 
 # ── constants ─────────────────────────────────────────────────────────────────
 

@@ -10,7 +10,7 @@
 > boundaries), and save/load is a single `state_dict` + config path (no
 > `.keras`/SavedModel/H5 format matrix, no weight-name-collision failure mode).
 
-Throwaway scripts that prove the two load-bearing claims the neural-bamlss design
+Throwaway scripts that prove the two load-bearing claims the dune-bayes design
 rests on, **before** building out the real package. If either spike fails, the
 corresponding ADR needs revisiting.
 

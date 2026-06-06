@@ -12,10 +12,10 @@ Four reference-test archetypes (CLAUDE.md):
 import pytest
 import torch
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.sampling import T_EVAL, draw_predictive, pointwise_log_lik
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.sampling import T_EVAL, draw_predictive, pointwise_log_lik
+from dune_bayes.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -335,7 +335,7 @@ def test_draw_predictive_with_embedding_net(data_y, family):
     (issue 0027), so the expanded index tensor yields T independent draws —
     same shape/independence contract as the dense path.
     """
-    from neural_bamlss.layers import BayesianEmbedding
+    from dune_bayes.layers import BayesianEmbedding
 
     torch.manual_seed(34)
     formula = {

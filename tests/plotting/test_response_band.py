@@ -47,7 +47,7 @@ def y():
 
 def test_predictive_quantiles_output_shape(predictive):
     """lo/mid/hi each have shape (n,) — one scalar quantile per observation."""
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     result = predictive_quantiles(predictive, seed=0)
     for key in ("lo", "mid", "hi"):
@@ -65,7 +65,7 @@ def test_interval_bounds_90(predictive):
     so they produce identical sample tensors → identical quantiles.
     atol=1e-5: float32 rounding in torch.quantile interpolation.
     """
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     # Reference: draw 5000 samples with seed=0.
     torch.manual_seed(0)
@@ -95,7 +95,7 @@ def test_mid_is_median_not_mean(predictive):
     Both reference and implementation draw 5000 samples from seed=0 →
     identical tensors → exact comparison (atol=1e-5 for float32 rounding).
     """
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     # Reference with seed=0 and n_samples=5000.
     torch.manual_seed(0)
@@ -125,7 +125,7 @@ def test_credible_interval_configurable(predictive):
     quantile levels differ.  The 50% band must be strictly narrower in all
     obs: hi_50 < hi_90 and lo_50 > lo_90 everywhere.
     """
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     r90 = predictive_quantiles(predictive, credible_interval=0.90, seed=0)
     r50 = predictive_quantiles(predictive, credible_interval=0.50, seed=0)
@@ -144,7 +144,7 @@ def test_seeded_quantiles_preserve_global_rng_state(predictive):
     generator= hook on .sample()), so a draw before and after the call must
     behave as if the call never touched the RNG.
     """
-    from neural_bamlss.plotting import predictive_quantiles
+    from dune_bayes.plotting import predictive_quantiles
 
     torch.manual_seed(123)
     expected = torch.randn(4)  # what the global stream yields without the call
@@ -169,7 +169,7 @@ def test_plot_dist_returns_axes(predictive, y):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from neural_bamlss.plotting import plot_dist
+    from dune_bayes.plotting import plot_dist
 
     ax = plot_dist(predictive, y, seed=0)
     assert isinstance(ax, plt.Axes)
@@ -188,7 +188,7 @@ def test_plot_dist_contains_ribbon_and_scatter(predictive, y):
     matplotlib.use("Agg")
     from matplotlib.collections import PathCollection, PolyCollection
 
-    from neural_bamlss.plotting import plot_dist
+    from dune_bayes.plotting import plot_dist
 
     ax = plot_dist(predictive, y, seed=0)
 
@@ -209,7 +209,7 @@ def test_plot_dist_accepts_existing_axes(predictive, y):
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    from neural_bamlss.plotting import plot_dist
+    from dune_bayes.plotting import plot_dist
 
     _, ax_in = plt.subplots()
     ax_out = plot_dist(predictive, y, ax=ax_in, seed=0)
