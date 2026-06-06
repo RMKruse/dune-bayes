@@ -20,13 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from neural_bamlss.layers.base import _RHO_INIT, VariationalLayer, gaussian_kl
-
-_ACTIVATIONS: dict[str | None, object] = {
-    None: None,
-    "linear": None,
-    "relu": F.relu,
-    "tanh": torch.tanh,
-}
+from neural_bamlss.utils import resolve_activation
 
 
 class VariationalDense(VariationalLayer):
@@ -67,10 +61,8 @@ class VariationalDense(VariationalLayer):
         self.units = int(units)
         self.prior_scale = float(prior_scale)
         self.flipout = bool(flipout)
-        if activation not in _ACTIVATIONS:
-            raise ValueError(
-                f"unknown activation {activation!r}; choose from {set(_ACTIVATIONS)}"
-            )
+        # Resolved once here (validates the name); config keeps the string.
+        self._act = resolve_activation(activation)
         self.activation = activation
         self.use_bias = bool(use_bias)
         self.validate_args = bool(validate_args)
@@ -140,9 +132,8 @@ class VariationalDense(VariationalLayer):
         # β·KL/N stashed (via the base) so collect_kl() can aggregate after the pass.
         self._stash_kl(kl)
 
-        act = _ACTIVATIONS[self.activation]
-        if act is not None:
-            out = act(out)  # type: ignore[operator]
+        if self._act is not None:
+            out = self._act(out)
         return out
 
     # ── serialization ─────────────────────────────────────────────────────────
