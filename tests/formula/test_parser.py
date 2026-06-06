@@ -54,6 +54,37 @@ def test_term_kwargs_are_forwarded_to_shape_constructor():
     assert formula["x2"].hidden_dims == [16]
 
 
+# ── prior tiers reachable from the formula (ADR-0002, issue #73) ──────────────
+
+
+def test_prior_kwarg_builds_handle_and_auto_wires_kl_divisor():
+    """ADR-0002's formula surface: the prior tier is a literal term kwarg.
+
+    The n_obs auto-wiring must reach the handle too — the hyperprior KL is
+    part of the same KL/N objective (ADR-0001).
+    """
+    parsed = parse_formula("y ~ BayesianMLP(x1, prior='empirical_bayes')")
+    formula = build_formula(parsed, family=NormalFamily(), n_obs=500)
+
+    handle = formula["x1"].prior_scale_handle
+    assert handle is not None
+    assert handle.mode == "empirical_bayes"
+    assert handle.kl_divisor == 500.0
+
+
+def test_prior_dict_literal_forwards_hyperprior_config():
+    """A dict literal selects the hierarchical tier with its hyperprior knobs."""
+    parsed = parse_formula(
+        "y ~ NeuralLinearMLP(x1, prior={'mode': 'hierarchical', 'tau': 2.0})"
+    )
+    formula = build_formula(parsed, family=NormalFamily())
+
+    handle = formula["x1"].prior_scale_handle
+    assert handle.mode == "hierarchical"
+    assert handle.hyperprior == "half_cauchy"
+    assert handle.tau == 2.0
+
+
 # ── unknown shape-function name → clear, actionable error ─────────────────────
 
 

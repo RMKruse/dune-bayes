@@ -157,3 +157,92 @@ def test_mc_mean_stabilises_with_more_draws(x):
     assert mean_a.isfinite().all()
     draws = torch.stack([model(x) for _ in range(50)])
     assert draws.std(dim=0).mean().item() > 0.0, "model output is not stochastic"
+
+
+# ── 7. per-net PriorScale tiers (ADR-0002, issue #73) ─────────────────────────
+
+
+def test_prior_empirical_bayes_learns_scale_through_elbo(x):
+    """prior='empirical_bayes' wires one learnable scale into the KL gradient path.
+
+    ADR-0002's headline feature: the per-net prior scale is the neural analog of
+    one mgcv smoothing parameter λ, learned by optimizing it through the ELBO.
+    The gradient must reach the handle from the KL term alone.
+    """
+    torch.manual_seed(11)
+    net = BayesianMLP(IN, PARAM_COUNT, hidden_dims=[8], prior="empirical_bayes")
+    net(x)
+    collect_kl(net).backward()
+
+    assert net.prior_scale_handle is not None
+    assert net.prior_scale_handle.mode == "empirical_bayes"
+    assert net.prior_scale_handle.rho.grad is not None
+    assert float(net.prior_scale_handle.rho.grad) != 0.0
+
+
+def test_prior_handle_is_shared_across_all_layers_and_counted_once(x):
+    """One handle per net (ADR-0002 granularity); collect_kl counts it once.
+
+    With hidden_dims=[8] there are 2 VariationalDense layers sharing the handle.
+    IG hyperprior gives a deterministic positive hyperprior KL; the exact
+    decomposition total == kl₁ + kl₂ + kl_handle fails under a double-count.
+    rel=1e-5: float32 sum, no MC noise in the split.
+    """
+    torch.manual_seed(12)
+    net = BayesianMLP(
+        IN,
+        PARAM_COUNT,
+        hidden_dims=[8],
+        prior={"mode": "hierarchical", "hyperprior": "inverse_gamma"},
+    )
+    net(x)
+
+    handle = net.prior_scale_handle
+    assert all(layer.prior_scale_handle is handle for layer in net.layers), (
+        "every VariationalDense in the net must share the one per-net handle"
+    )
+    total = float(collect_kl(net).detach())
+    parts = sum(float(layer.kl.detach()) for layer in net.layers) + float(
+        handle.kl.detach()
+    )
+    assert float(handle.kl.detach()) > 0.0
+    assert total == pytest.approx(parts, rel=1e-5)
+
+
+def test_prior_round_trip_config_and_state_dict(x):
+    """A prior-carrying net round-trips: config values + max|Δw| == 0."""
+    torch.manual_seed(13)
+    net = BayesianMLP(
+        IN,
+        PARAM_COUNT,
+        hidden_dims=[8],
+        prior_scale=0.5,
+        prior="empirical_bayes",
+        kl_divisor=64.0,
+    )
+    config = net.get_config()
+    assert config["prior"] == "empirical_bayes"
+
+    restored = BayesianMLP.from_config(config)
+    restored.load_state_dict(net.state_dict())
+
+    sa, sb = net.state_dict(), restored.state_dict()
+    assert sa.keys() == sb.keys(), "state_dict key sets differ"
+    max_delta = max(float((sa[k] - sb[k]).abs().max()) for k in sa)
+    assert max_delta == 0.0, f"max|Δw| = {max_delta:.2e}"
+
+    # The restored handle starts from the configured scale and divisor.
+    assert restored.prior_scale_handle.kl_divisor == 64.0
+    assert float(restored.prior_scale_handle().detach()) == pytest.approx(
+        float(net.prior_scale_handle().detach()), rel=1e-6
+    )
+
+
+def test_invalid_prior_spec_raises():
+    """A prior spec that is neither None, str, nor dict raises ValueError."""
+    with pytest.raises(ValueError, match="prior"):
+        BayesianMLP(IN, PARAM_COUNT, hidden_dims=[8], prior=42)
+    with pytest.raises(ValueError, match="unknown mode"):
+        BayesianMLP(IN, PARAM_COUNT, hidden_dims=[8], prior="banana")
+    with pytest.raises(ValueError, match="prior"):
+        BayesianMLP(IN, PARAM_COUNT, hidden_dims=[8], prior={"mode": "fixed", "x": 1})

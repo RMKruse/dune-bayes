@@ -1,4 +1,4 @@
-"""PriorScale handle — three-tier prior variance (ADR-0002, issue 0011 / GitHub #12).
+"""PriorScale handle — three-tier prior variance (ADR-0002, issues #12, #73).
 
 Maps one per-feature prior-variance scalar — the neural analog of one mgcv
 smoothing parameter λ (penalty ⇔ Gaussian prior, ADR-0002) — across three tiers:
@@ -10,6 +10,16 @@ smoothing parameter λ (penalty ⇔ Gaussian prior, ADR-0002) — across three t
 
 The same scalar doubles as the categorical random-effect variance component
 (issue 0012 / GitHub #13). Config is closure-free and serializable.
+
+Consumers (issue #73): ``BayesianEmbedding`` and ``VariationalDense`` accept a
+handle via ``prior_scale_handle=``; ``BayesianMLP`` / ``NeuralLinearMLP`` build
+one shared per-net handle from their literal ``prior=`` spec (``from_spec``),
+so all three tiers are reachable from the formula path.
+
+PriorScale is itself a ``VariationalLayer``: it stashes its own hyperprior KL
+on ``forward()``, so ``collect_kl`` finds it through the module walk — and
+counts a handle shared across several layers exactly once, because
+``nn.Module.modules()`` deduplicates shared submodules.
 """
 
 import math
@@ -18,8 +28,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# softplus(-3) ≈ 0.049 — tight initial posterior scale (matches VariationalDense).
-_RHO_INIT = -3.0
+# Importing layers.base runs layers/__init__, which must therefore not import
+# this module at exec time (its PriorScale imports are local — issue #73).
+from neural_bamlss.layers.base import _RHO_INIT, VariationalLayer
 
 
 def _softplus_inv(y: float) -> float:
@@ -27,8 +38,8 @@ def _softplus_inv(y: float) -> float:
     return math.log(math.expm1(y))
 
 
-class PriorScale(nn.Module):
-    """Three-tier prior variance handle (ADR-0002, issue 0011 / GitHub #12).
+class PriorScale(VariationalLayer):
+    """Three-tier prior variance handle (ADR-0002, issues #12, #73).
 
     Each feature net carries exactly one PriorScale — the neural analog of mgcv's
     per-feature smoothing parameter.  Config is closure-free and serializable.
@@ -51,6 +62,8 @@ class PriorScale(nn.Module):
         tau: Half-Cauchy scale τ > 0 (hierarchical + half_cauchy). Default 1.0.
         alpha0: InvGamma shape α₀ > 0 (hierarchical + inverse_gamma). Default 1.0.
         beta0: InvGamma rate β₀ > 0 (hierarchical + inverse_gamma). Default 1.0.
+        kl_divisor: KL denominator — set to N for the KL/N weighting (ADR-0001);
+            applies to the stashed hyperprior KL.
         validate_args: Passed to torch.distributions constructors. False in the
             training hot path; True in test fixtures (numerical rule 6).
     """
@@ -63,9 +76,10 @@ class PriorScale(nn.Module):
         tau: float = 1.0,
         alpha0: float = 1.0,
         beta0: float = 1.0,
+        kl_divisor: float = 1.0,
         validate_args: bool = False,
     ) -> None:
-        super().__init__()
+        super().__init__(kl_divisor=kl_divisor)
         _valid_modes = ("fixed", "empirical_bayes", "hierarchical")
         if mode not in _valid_modes:
             raise ValueError(f"unknown mode {mode!r}; choose from {_valid_modes}")
@@ -107,19 +121,27 @@ class PriorScale(nn.Module):
         Empirical-Bayes: returns softplus(rho) — a differentiable point estimate.
         Hierarchical:  returns exp(loc_s + sigma_s · ε), ε ~ N(0,1) — a
                        reparameterized sample from the log-normal posterior.
+
+        Each call also stashes β·hyperprior_kl/kl_divisor so collect_kl()
+        reaches the hyperprior term (issue #73).  Layers sharing this handle
+        each trigger a re-stash; the overwrite is harmless — every stash is an
+        unbiased single-sample estimate, and the module walk counts it once.
         """
         if self.mode == "fixed":
+            self.kl = torch.zeros(())  # structural zero — no β theater
             return self._scale_buf
         if self.mode == "empirical_bayes":
+            self.kl = torch.zeros(())  # structural zero — no β theater
             return F.softplus(self.rho)
         # hierarchical
+        self._stash_kl(self.hyperprior_kl())
         sigma_s = F.softplus(self.rho_s)
         eps = torch.randn((), device=self.loc_s.device, dtype=self.loc_s.dtype)
         return torch.exp(self.loc_s + sigma_s * eps)
 
     # ── KL ────────────────────────────────────────────────────────────────────
 
-    def kl(self) -> torch.Tensor:
+    def hyperprior_kl(self) -> torch.Tensor:
         """KL contribution from the scale's hyperprior.
 
         Fixed / empirical_bayes:
@@ -198,8 +220,53 @@ class PriorScale(nn.Module):
             "tau": self.tau,
             "alpha0": self.alpha0,
             "beta0": self.beta0,
+            "kl_divisor": self.kl_divisor,
         }
 
     @classmethod
     def from_config(cls, config: dict) -> "PriorScale":
         return cls(**config)
+
+    @classmethod
+    def from_spec(
+        cls,
+        prior: str | dict,
+        scale: float = 1.0,
+        kl_divisor: float = 1.0,
+    ) -> "PriorScale":
+        """Build a handle from a literal prior spec (formula-friendly, issue #73).
+
+        Specs stay ``ast.literal_eval``-compatible so they can appear verbatim
+        as formula kwargs, e.g. ``BayesianMLP(x1, prior='empirical_bayes')`` or
+        ``prior={'mode': 'hierarchical', 'tau': 2.0}``.
+
+        Args:
+            prior: Mode string (``"fixed"`` | ``"empirical_bayes"`` |
+                ``"hierarchical"``) or a full config dict as accepted by
+                ``__init__``.
+            scale: Default initial / fixed scale; a dict spec may override it.
+            kl_divisor: Default KL/N denominator (ADR-0001); a dict spec may
+                override it.
+
+        Returns:
+            New PriorScale.
+
+        Raises:
+            ValueError: If the spec is neither str nor dict, or carries
+                unknown keys / an unknown mode or hyperprior.
+        """
+        if isinstance(prior, str):
+            cfg: dict = {"mode": prior}
+        elif isinstance(prior, dict):
+            cfg = dict(prior)
+        else:
+            raise ValueError(
+                f"prior spec must be a mode string or a config dict, "
+                f"got {type(prior).__name__}: {prior!r}"
+            )
+        cfg.setdefault("scale", scale)
+        cfg.setdefault("kl_divisor", kl_divisor)
+        try:
+            return cls(**cfg)
+        except TypeError as exc:  # unknown dict keys → uniform ValueError surface
+            raise ValueError(f"invalid prior spec {prior!r}: {exc}") from exc

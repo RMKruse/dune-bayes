@@ -1,9 +1,10 @@
-"""VariationalDense — the variational atom (ADR-0004, issue 0001 / GitHub #2).
+"""VariationalDense — the variational atom (ADR-0004, issues #2, #73).
 
 Mean-field Normal weight posterior (loc + softplus(rho) scale), closed-form
 Gaussian–Gaussian KL, and an optional local-reparameterization / flipout-style
 estimator for lower gradient variance.  Prior is specified by a serializable
-float (never a closure) so get_config/from_config round-trips cleanly.
+float (never a closure) so get_config/from_config round-trips cleanly — or by
+a PriorScale handle for the ADR-0002 empirical-Bayes / hierarchical tiers.
 
 Design decisions encoded here:
   - softplus(rho) keeps scale strictly positive (CLAUDE.md numerical rule 1).
@@ -15,12 +16,23 @@ Design decisions encoded here:
     (numerical rule 6).
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from neural_bamlss.layers.base import _RHO_INIT, VariationalLayer, gaussian_kl
 from neural_bamlss.utils import resolve_activation
+
+if TYPE_CHECKING:
+    from neural_bamlss.priors.prior_scale import PriorScale
+
+# PriorScale imports stay local (TYPE_CHECKING + function bodies): PriorScale
+# subclasses VariationalLayer, so priors → layers/__init__ → this module is a
+# real cycle if PriorScale is needed at module-exec time (issue #73).
 
 
 class VariationalDense(VariationalLayer):
@@ -32,6 +44,12 @@ class VariationalDense(VariationalLayer):
         units: Output dimension.
         prior_scale: Std of the N(0, prior_scale²) weight prior. A plain
             float so it survives get_config/from_config without closures.
+        prior_scale_handle: Optional PriorScale (ADR-0002, issue #73). When
+            given it overrides ``prior_scale``: the KL uses a live scalar
+            tensor s = handle() so the empirical-Bayes / hierarchical scale
+            keeps its gradient path. Several layers may share one handle
+            (one smoothness scalar per feature net); the handle stashes its
+            own hyperprior KL, counted once by collect_kl.
         kl_divisor: KL term denominator — set to N (training-set size) for
             the KL/N weighting prescribed by ADR-0001.
         flipout: If True use the local-reparameterization estimator: sample
@@ -50,6 +68,7 @@ class VariationalDense(VariationalLayer):
         in_features: int,
         units: int,
         prior_scale: float = 1.0,
+        prior_scale_handle: PriorScale | None = None,
         kl_divisor: float = 1.0,
         flipout: bool = False,
         activation: str | None = None,
@@ -60,6 +79,7 @@ class VariationalDense(VariationalLayer):
         self.in_features = int(in_features)
         self.units = int(units)
         self.prior_scale = float(prior_scale)
+        self.prior_scale_handle = prior_scale_handle
         self.flipout = bool(flipout)
         # Resolved once here (validates the name); config keeps the string.
         self._act = resolve_activation(activation)
@@ -121,13 +141,21 @@ class VariationalDense(VariationalLayer):
         else:
             out = self._forward_vanilla(x, kernel_scale)
 
-        kl = gaussian_kl(self.kernel_loc, kernel_scale, self.prior_scale)
+        # One handle() call per forward: kernel and bias share the same prior
+        # scale draw, and the handle stashes its own hyperprior KL on the call.
+        prior: float | torch.Tensor
+        if self.prior_scale_handle is not None:
+            prior = self.prior_scale_handle()
+        else:
+            prior = self.prior_scale
+
+        kl = gaussian_kl(self.kernel_loc, kernel_scale, prior)
 
         if self.use_bias:
             bias_scale = F.softplus(self.bias_rho)
             bias = self.bias_loc + bias_scale * torch.randn_like(self.bias_loc)
             out = out + bias
-            kl = kl + gaussian_kl(self.bias_loc, bias_scale, self.prior_scale)
+            kl = kl + gaussian_kl(self.bias_loc, bias_scale, prior)
 
         # β·KL/N stashed (via the base) so collect_kl() can aggregate after the pass.
         self._stash_kl(kl)
@@ -139,11 +167,21 @@ class VariationalDense(VariationalLayer):
     # ── serialization ─────────────────────────────────────────────────────────
 
     def get_config(self) -> dict:
-        """Return a closure-free config (ints, floats, strings, bools only)."""
+        """Return a closure-free config (ints, floats, strings, bools, dicts only).
+
+        A standalone round-trip rebuilds the handle from ``prior_scale_config``;
+        a net that shares one handle across layers reconstructs and re-injects
+        it itself (see BayesianMLP.from_config), bypassing this key.
+        """
         return {
             "in_features": self.in_features,
             "units": self.units,
             "prior_scale": self.prior_scale,
+            "prior_scale_config": (
+                None
+                if self.prior_scale_handle is None
+                else self.prior_scale_handle.get_config()
+            ),
             "kl_divisor": self.kl_divisor,
             "flipout": self.flipout,
             "activation": self.activation,
@@ -151,5 +189,10 @@ class VariationalDense(VariationalLayer):
         }
 
     @classmethod
-    def from_config(cls, config: dict) -> "VariationalDense":
-        return cls(**config)
+    def from_config(cls, config: dict) -> VariationalDense:
+        from neural_bamlss.priors.prior_scale import PriorScale
+
+        cfg = dict(config)
+        ps_config = cfg.pop("prior_scale_config", None)
+        handle = None if ps_config is None else PriorScale.from_config(ps_config)
+        return cls(prior_scale_handle=handle, **cfg)
