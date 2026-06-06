@@ -11,16 +11,10 @@ throughout. Output layer has no bias (intercept handled by BayesianIntercept).
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+
+from neural_bamlss.utils import resolve_activation
 
 _DEFAULT_HIDDEN_DIMS: list[int] = [64, 64]
-
-_ACTIVATIONS: dict[str | None, object] = {
-    None: None,
-    "linear": None,
-    "relu": F.relu,
-    "tanh": torch.tanh,
-}
 
 
 class DeterministicMLP(nn.Module):
@@ -54,10 +48,8 @@ class DeterministicMLP(nn.Module):
             self.hidden_dims = list(hidden_dims)
         else:
             self.hidden_dims = list(_DEFAULT_HIDDEN_DIMS)
-        if activation not in _ACTIVATIONS:
-            raise ValueError(
-                f"unknown activation {activation!r}; choose from {set(_ACTIVATIONS)}"
-            )
+        # Resolved once here (validates the name); config keeps the string.
+        self._act = resolve_activation(activation)
         self.activation = activation
 
         layers: list[nn.Module] = []
@@ -78,12 +70,11 @@ class DeterministicMLP(nn.Module):
         Returns:
             Output tensor of shape (batch, param_count).
         """
-        act = _ACTIVATIONS[self.activation]
         # All but the last layer get activation; output layer is linear.
         for layer in self.layers[:-1]:
             x = layer(x)
-            if act is not None:
-                x = act(x)  # type: ignore[operator]
+            if self._act is not None:
+                x = self._act(x)
         return self.layers[-1](x)
 
     # ── serialization ─────────────────────────────────────────────────────────
