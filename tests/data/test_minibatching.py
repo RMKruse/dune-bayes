@@ -99,7 +99,7 @@ def test_dataloader_shuffle_is_seedable(dm):
     order1 = [batch_y.clone() for _, batch_y in loader1]
     order2 = [batch_y.clone() for _, batch_y in loader2]
 
-    for y1, y2 in zip(order1, order2):
+    for y1, y2 in zip(order1, order2, strict=True):
         assert torch.equal(y1, y2)
 
 
@@ -114,7 +114,7 @@ def test_dataloader_different_seeds_differ(dm):
     order2 = [batch_y.clone() for _, batch_y in loader2]
 
     # Not all batches should be identical (probability of collision ≈ 0 for N=32).
-    assert any(not torch.equal(y1, y2) for y1, y2 in zip(order1, order2))
+    assert any(not torch.equal(y1, y2) for y1, y2 in zip(order1, order2, strict=True))
 
 
 # ── AC3: KL divisor stays full-data N ────────────────────────────────────────
@@ -181,7 +181,7 @@ def test_fit_with_batch_size_runs_to_completion(dm, toy_model):
     last_nll = history["nll"][-1]
     # NLL should decrease; 10% tolerance for MC noise (mirrors test_bayesian_namlss.py).
     assert last_nll < first_nll * 1.10, (
-        "NLL did not decrease: first={:.4f}, last={:.4f}".format(first_nll, last_nll)
+        f"NLL did not decrease: first={first_nll:.4f}, last={last_nll:.4f}"
     )
 
 

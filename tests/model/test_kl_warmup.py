@@ -67,7 +67,8 @@ def test_warmup_auto_injected(model, X_y):
     have kl_beta == 1.0 (schedule completed, no β argument passed by the user).
     """
     X, y = X_y
-    # β = min(1, epoch / warmup_epochs) → first hits 1.0 at epoch index == warmup_epochs.
+    # β = min(1, epoch / warmup_epochs) → first hits 1.0 at epoch index
+    # == warmup_epochs.
     # Train warmup_epochs + 1 steps so the final epoch starts with β = 1.0.
     warmup = 4
     model.fit(X, y, epochs=warmup + 1, lr=1e-2, warmup_epochs=warmup)

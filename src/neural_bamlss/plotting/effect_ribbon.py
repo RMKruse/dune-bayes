@@ -11,8 +11,6 @@ flag-able for uncentered mode (deviates from NAMpy's uncentered default).
 
 from __future__ import annotations
 
-from typing import Optional
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -62,8 +60,8 @@ def plot_effect_ribbon(
     credible_interval: float = 0.90,
     center: bool = True,
     param_idx: int = 0,
-    ax: Optional[plt.Axes] = None,
-    feature_name: Optional[str] = None,
+    ax: plt.Axes | None = None,
+    feature_name: str | None = None,
 ) -> plt.Axes:
     """Plot centered epistemic credible ribbon for one feature.
 

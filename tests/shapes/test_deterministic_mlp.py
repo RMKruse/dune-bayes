@@ -94,7 +94,7 @@ def test_collect_kl_is_zero_after_forward(model, x):
 
 
 def test_output_is_deterministic(model, x):
-    """Pure nn.Linear: same input must produce exactly identical output on every call."""
+    """Pure nn.Linear: same input must give exactly identical output every call."""
     model.eval()
     with torch.no_grad():
         out1 = model(x)
@@ -118,7 +118,7 @@ def test_round_trip_state_dict_exact(model):
     restored = DeterministicMLP.from_config(config)
     restored.load_state_dict(model.state_dict())
     for (k, orig), (_, rest) in zip(
-        model.state_dict().items(), restored.state_dict().items()
+        model.state_dict().items(), restored.state_dict().items(), strict=True
     ):
         assert (orig - rest).abs().max().item() == 0.0, f"weight '{k}' differs"
 

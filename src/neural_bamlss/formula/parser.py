@@ -235,11 +235,14 @@ def _instantiate(
             f"{ShapeFunctionRegistry.names()}."
         )
     kwargs = dict(kwargs)
-    if n_obs is not None and "kl_divisor" not in kwargs:
-        # Signature check, not a Bayesian-ness check: deterministic shape
-        # functions simply have no kl_divisor parameter to wire.
-        if "kl_divisor" in inspect.signature(shape_cls.__init__).parameters:
-            kwargs["kl_divisor"] = float(n_obs)
+    # Signature check, not a Bayesian-ness check: deterministic shape
+    # functions simply have no kl_divisor parameter to wire.
+    if (
+        n_obs is not None
+        and "kl_divisor" not in kwargs
+        and "kl_divisor" in inspect.signature(shape_cls.__init__).parameters
+    ):
+        kwargs["kl_divisor"] = float(n_obs)
     return shape_cls(in_features=in_features, param_count=family.param_count, **kwargs)
 
 

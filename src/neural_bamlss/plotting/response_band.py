@@ -11,8 +11,6 @@ response-level property and is deliberately not attributed to individual feature
 
 from __future__ import annotations
 
-from typing import Optional
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -74,7 +72,7 @@ def plot_dist(
     y: torch.Tensor | np.ndarray,
     credible_interval: float = 0.90,
     n_samples: int = 2000,
-    ax: Optional[plt.Axes] = None,
+    ax: plt.Axes | None = None,
     seed: int | None = None,
 ) -> plt.Axes:
     """Plot the full predictive band against actual response values.

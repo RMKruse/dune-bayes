@@ -13,8 +13,6 @@ Both surfaces use matplotlib.tri.tricontourf, which handles the irregular
 
 from __future__ import annotations
 
-from typing import Optional
-
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -49,8 +47,8 @@ def plot_interaction_surface(
     x1_values: np.ndarray | torch.Tensor,
     x2_values: np.ndarray | torch.Tensor,
     param_idx: int = 0,
-    feature_names: Optional[tuple[str, str]] = None,
-    fig: Optional[plt.Figure] = None,
+    feature_names: tuple[str, str] | None = None,
+    fig: plt.Figure | None = None,
 ) -> plt.Figure:
     """Plot posterior-mean surface and epistemic-SD surface for an interaction.
 

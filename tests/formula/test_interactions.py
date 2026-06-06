@@ -4,11 +4,9 @@ Boundary tests: joint-net parsing, combined-key contract, mixed formulas,
 kwarg forwarding, and end-to-end training. Asserts external behavior only.
 """
 
-import pytest
-
 from neural_bamlss.families import NormalFamily
 from neural_bamlss.formula import build_formula, parse_formula
-from neural_bamlss.shapes import BayesianMLP, NeuralLinearMLP
+from neural_bamlss.shapes import BayesianMLP
 
 # ── tracer bullet: single interaction term ────────────────────────────────────
 
@@ -41,9 +39,7 @@ def test_interaction_uses_shape_from_first_factor():
 
 
 def test_mixed_formula_builds_additive_and_interaction_entries():
-    parsed = parse_formula(
-        "y ~ BayesianMLP(x1) + BayesianMLP(x2):BayesianMLP(x3)"
-    )
+    parsed = parse_formula("y ~ BayesianMLP(x1) + BayesianMLP(x2):BayesianMLP(x3)")
     formula = build_formula(parsed, family=NormalFamily())
 
     assert set(formula.keys()) == {"x1", "x2:x3"}
@@ -59,8 +55,7 @@ def test_mixed_formula_builds_additive_and_interaction_entries():
 
 def test_interaction_kwargs_from_first_factor_are_forwarded():
     parsed = parse_formula(
-        "y ~ BayesianMLP(x1, prior_scale=0.5, hidden_dims=(16,))"
-        ":BayesianMLP(x2)"
+        "y ~ BayesianMLP(x1, prior_scale=0.5, hidden_dims=(16,)):BayesianMLP(x2)"
     )
     formula = build_formula(parsed, family=NormalFamily())
 
