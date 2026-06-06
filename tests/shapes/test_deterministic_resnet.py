@@ -57,13 +57,17 @@ def test_forward_output_shape(model, x):
 
 
 def test_forward_output_shape_single_block(x):
-    m = DeterministicResNet(in_features=IN, param_count=PARAM_COUNT, hidden_dim=8, num_blocks=1)
+    m = DeterministicResNet(
+        in_features=IN, param_count=PARAM_COUNT, hidden_dim=8, num_blocks=1
+    )
     out = m(x)
     assert out.shape == (BATCH, PARAM_COUNT)
 
 
 def test_forward_output_shape_deep(x):
-    m = DeterministicResNet(in_features=IN, param_count=PARAM_COUNT, hidden_dim=32, num_blocks=4)
+    m = DeterministicResNet(
+        in_features=IN, param_count=PARAM_COUNT, hidden_dim=32, num_blocks=4
+    )
     out = m(x)
     assert out.shape == (BATCH, PARAM_COUNT)
 
@@ -85,6 +89,7 @@ def test_no_dropout_in_module_tree(model):
 def test_residual_blocks_exist(model):
     """ResNet must contain at least one residual block (structural contract)."""
     from neural_bamlss.shapes.deterministic_resnet import ResBlock
+
     blocks = [m for m in model.modules() if isinstance(m, ResBlock)]
     assert len(blocks) == 2  # num_blocks=2 in fixture
 
@@ -107,7 +112,7 @@ def test_collect_kl_is_zero_after_forward(model, x):
 
 
 def test_output_is_deterministic(model, x):
-    """Pure nn.Linear: same input must produce exactly identical output on every call."""
+    """Pure nn.Linear: same input must give exactly identical output every call."""
     model.eval()
     with torch.no_grad():
         out1 = model(x)
@@ -130,7 +135,7 @@ def test_round_trip_state_dict_exact(model):
     restored = DeterministicResNet.from_config(config)
     restored.load_state_dict(model.state_dict())
     for (k, orig), (_, rest) in zip(
-        model.state_dict().items(), restored.state_dict().items()
+        model.state_dict().items(), restored.state_dict().items(), strict=True
     ):
         assert (orig - rest).abs().max().item() == 0.0, f"weight '{k}' differs"
 
