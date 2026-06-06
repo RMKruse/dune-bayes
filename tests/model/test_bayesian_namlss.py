@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 
 from neural_bamlss.families import NormalFamily
-from neural_bamlss.layers import BayesianIntercept, collect_kl
+from neural_bamlss.layers import BayesianEmbedding, BayesianIntercept, collect_kl
 from neural_bamlss.model import BayesianNAMLSS
 from neural_bamlss.shapes import BayesianMLP
 
@@ -301,6 +301,27 @@ def test_feature_dropout_overridable(family):
         feature_dropout=0.3,
     )
     assert model.feature_dropout == pytest.approx(0.3)
+
+
+def test_feature_dropout_defaults_to_zero_when_embedding_only(family):
+    """An embedding-only formula counts as Bayesian for the dropout default.
+
+    BayesianEmbedding is a VariationalLayer but not a VariationalDense; the
+    Bayesian-presence check must use the base class so the weight posterior —
+    not feature noise — supplies the stochasticity (issue 0064 rationale).
+    """
+    model = BayesianNAMLSS(
+        formula={
+            "group": BayesianEmbedding(
+                num_embeddings=4,
+                embedding_dim=family.param_count,
+                kl_divisor=N_OBS,
+            )
+        },
+        family=family,
+        n_obs=N_OBS,
+    )
+    assert model.feature_dropout == 0.0
 
 
 def test_feature_dropout_defaults_to_nampy_rate_when_deterministic_only(family):
