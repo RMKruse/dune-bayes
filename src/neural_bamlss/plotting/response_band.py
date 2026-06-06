@@ -38,21 +38,26 @@ def predictive_quantiles(
         n_samples: Number of Monte-Carlo draws used to estimate quantiles.
             Default 2000 balances accuracy and speed.
         seed: Optional integer seed for reproducible quantile estimation.
-            Sets the global torch seed immediately before sampling.
+            Applied inside a forked RNG scope, so the caller's global torch
+            RNG state is left untouched.
 
     Returns:
         Dict with keys "lo", "mid", "hi", each a float32 Tensor of shape (n,).
         "mid" is the 50th percentile (median) of the predictive.
         "lo"/"hi" are the tail quantiles defined by credible_interval.
     """
-    if seed is not None:
-        torch.manual_seed(seed)
-
     alpha = (1.0 - credible_interval) / 2.0
 
-    with torch.no_grad():
-        # (n_samples, n) — K independent draws from each observation's mixture.
-        samples = predictive.sample([n_samples]).float()
+    # torch.distributions has no generator= hook on .sample(), so the only way
+    # to seed is via the global RNG. fork_rng restores the caller's RNG state
+    # on exit — seeding here must not perturb downstream sampling.
+    with torch.random.fork_rng(enabled=seed is not None):
+        if seed is not None:
+            torch.manual_seed(seed)
+        with torch.no_grad():
+            # (n_samples, n) — K independent draws from each observation's
+            # mixture.
+            samples = predictive.sample([n_samples]).float()
 
     # Reduce over dim=0 (the n_samples axis) to get per-observation quantiles.
     lo = torch.quantile(samples, alpha, dim=0)  # (n,)
