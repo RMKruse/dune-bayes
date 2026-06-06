@@ -137,7 +137,7 @@ def test_round_trip_state_dict_exact(model):
     restored.load_state_dict(model.state_dict())
 
     for (k, orig), (_, rest) in zip(
-        model.state_dict().items(), restored.state_dict().items()
+        model.state_dict().items(), restored.state_dict().items(), strict=True
     ):
         max_delta = (orig - rest).abs().max().item()
         assert max_delta == 0.0, f"weight '{k}' differs after round-trip"
