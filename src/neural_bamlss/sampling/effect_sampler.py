@@ -11,7 +11,7 @@ Design:
   - Per-feature contributions (not the summed predictor) are returned for
     epistemic ribbon plots (CONTEXT.md "Effect plot vs response plot").
   - T_predict = 200: default posterior-draw count (CONTEXT.md "MC sample counts").
-  - eval() is set for sampling; training mode is restored via finally.
+  - eval() is set for sampling; the caller's mode is restored via eval_mode.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from __future__ import annotations
 import torch
 
 from neural_bamlss.model import BayesianNAMLSS
+from neural_bamlss.utils import eval_mode
 
 T_PREDICT: int = 200
 
@@ -46,19 +47,13 @@ def sample_effects(
         Dict mapping feature name → Tensor[T, n, param_count] of float32.
         Each slice [t, :, :] is one posterior weight sample's contribution.
     """
-    was_training = model.training
-    model.eval()
-    try:
-        with torch.no_grad():
-            samples: dict[str, torch.Tensor] = {}
-            for name in model.feature_names:
-                net = model.nets[name]
-                x = data[name]
-                # Each net(x) samples fresh weights via reparameterization
-                # (VariationalDense.forward); T calls → T independent draws.
-                draws = torch.stack([net(x) for _ in range(T)], dim=0)
-                samples[name] = draws
-        return samples
-    finally:
-        if was_training:
-            model.train()
+    with eval_mode(model), torch.no_grad():
+        samples: dict[str, torch.Tensor] = {}
+        for name in model.feature_names:
+            net = model.nets[name]
+            x = data[name]
+            # Each net(x) samples fresh weights via reparameterization
+            # (VariationalDense.forward); T calls → T independent draws.
+            draws = torch.stack([net(x) for _ in range(T)], dim=0)
+            samples[name] = draws
+    return samples

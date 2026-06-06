@@ -17,6 +17,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from neural_bamlss.utils import to_numpy
+
 
 def predictive_quantiles(
     predictive: torch.distributions.MixtureSameFamily,
@@ -104,10 +106,7 @@ def plot_dist(
     mid = quants["mid"].numpy()
     hi = quants["hi"].numpy()
 
-    if isinstance(y, torch.Tensor):
-        y_np = y.numpy()
-    else:
-        y_np = np.asarray(y)
+    y_np = to_numpy(y)
 
     # Sort by predicted median for a monotone, visually clean ribbon.
     order = np.argsort(mid)

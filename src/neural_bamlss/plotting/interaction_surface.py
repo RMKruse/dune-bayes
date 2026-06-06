@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from neural_bamlss.utils import to_numpy
+
 
 def surface_stats(
     samples: torch.Tensor,
@@ -71,15 +73,8 @@ def plot_interaction_surface(
     mean_vals = stats["mean"][:, param_idx].numpy()  # [n]
     sd_vals = stats["sd"][:, param_idx].numpy()  # [n]
 
-    if isinstance(x1_values, torch.Tensor):
-        x1 = x1_values.numpy()
-    else:
-        x1 = np.asarray(x1_values)
-
-    if isinstance(x2_values, torch.Tensor):
-        x2 = x2_values.numpy()
-    else:
-        x2 = np.asarray(x2_values)
+    x1 = to_numpy(x1_values)
+    x2 = to_numpy(x2_values)
 
     if fig is None:
         fig, _ = plt.subplots(1, 2, figsize=(10, 4))

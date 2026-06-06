@@ -76,15 +76,22 @@ class _CategoricalEncoder:
         self._mapping = {cat: i for i, cat in enumerate(self._categories)}
 
     def transform(self, arr: np.ndarray) -> np.ndarray:
-        out = np.empty(len(arr), dtype=np.int64)
-        for i, val in enumerate(arr.tolist()):
-            if val not in self._mapping:
-                raise ValueError(
-                    f"Unseen category {val!r} in transform; "
-                    f"known levels: {self._categories}."
-                )
-            out[i] = self._mapping[val]
-        return out
+        # Categories are sorted at fit time, so searchsorted recovers each
+        # value's code vectorized; a mismatch after clipping flags an unseen
+        # level (values sorting past the last category clip back onto it).
+        cats = np.asarray(self._categories)
+        vals = np.asarray(arr)
+        idx = np.searchsorted(cats, vals)
+        clipped = np.minimum(idx, len(cats) - 1)
+        unseen = cats[clipped] != vals
+        if unseen.any():
+            # .tolist() yields a plain Python str so the !r repr stays clean.
+            val = vals[unseen].tolist()[0]
+            raise ValueError(
+                f"Unseen category {val!r} in transform; "
+                f"known levels: {self._categories}."
+            )
+        return idx.astype(np.int64)
 
     @property
     def num_levels(self) -> int:

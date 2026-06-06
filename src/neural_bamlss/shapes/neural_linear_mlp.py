@@ -17,18 +17,11 @@ Design:
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from neural_bamlss.layers import VariationalDense
+from neural_bamlss.utils import resolve_activation
 
 _DEFAULT_HIDDEN_DIMS: list[int] = [64, 64]
-
-_ACTIVATIONS: dict[str | None, object] = {
-    None: None,
-    "linear": None,
-    "relu": F.relu,
-    "tanh": torch.tanh,
-}
 
 
 class NeuralLinearMLP(nn.Module):
@@ -75,10 +68,8 @@ class NeuralLinearMLP(nn.Module):
         self.prior_scale = float(prior_scale)
         self.kl_divisor = float(kl_divisor)
         self.flipout = bool(flipout)
-        if activation not in _ACTIVATIONS:
-            raise ValueError(
-                f"unknown activation {activation!r}; choose from {set(_ACTIVATIONS)}"
-            )
+        # Resolved once here (validates the name); config keeps the string.
+        self._act = resolve_activation(activation)
         self.activation = activation
         self.validate_args = bool(validate_args)
 
@@ -110,11 +101,10 @@ class NeuralLinearMLP(nn.Module):
         Returns:
             Output tensor of shape (batch, param_count).
         """
-        act = _ACTIVATIONS[self.activation]
         for layer in self.hidden_layers:
             x = layer(x)
-            if act is not None:
-                x = act(x)  # type: ignore[operator]
+            if self._act is not None:
+                x = self._act(x)
         return self.output_layer(x)
 
     # ── serialization ─────────────────────────────────────────────────────────
