@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from neural_bamlss.families.base import BaseFamily
+from neural_bamlss.utils import EPS
 
 
 class GammaFamily(BaseFamily):
@@ -35,20 +36,10 @@ class GammaFamily(BaseFamily):
         Returns:
             torch.distributions.Gamma with batch_shape (...).
         """
-        concentration = F.softplus(params[..., 0]) + 1e-6
-        rate = F.softplus(params[..., 1]) + 1e-6
+        # softplus enforces strict positivity (numerical rule 1); EPS floor
+        # guards very negative raw inputs.
+        concentration = F.softplus(params[..., 0]) + EPS
+        rate = F.softplus(params[..., 1]) + EPS
         return torch.distributions.Gamma(
             concentration=concentration, rate=rate, validate_args=self.validate_args
         )
-
-    def log_prob(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Pointwise Gamma log-likelihood.
-
-        Args:
-            params: Raw network output, shape (batch, 2).
-            y: Observed positive responses, shape (batch,).
-
-        Returns:
-            Tensor of shape (batch,) with pointwise log p(y | params).
-        """
-        return self(params).log_prob(y)
