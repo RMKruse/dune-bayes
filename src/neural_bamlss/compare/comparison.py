@@ -28,6 +28,7 @@ from neural_bamlss.sampling.log_lik_sampler import (
     draw_predictive,
     pointwise_log_lik,
 )
+from neural_bamlss.utils import eval_mode
 
 
 @dataclass
@@ -222,12 +223,6 @@ def elbo(
     Returns:
         Scalar float. Higher ELBO = better evidence lower bound.
     """
-    was_training = model.training
-    model.eval()
-    try:
-        with torch.no_grad():
-            loss = model.loss(X, y)
-        return float(-loss)
-    finally:
-        if was_training:
-            model.train()
+    with eval_mode(model), torch.no_grad():
+        loss = model.loss(X, y)
+    return float(-loss)
