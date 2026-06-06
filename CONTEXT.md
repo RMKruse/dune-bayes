@@ -88,19 +88,45 @@ secondary, biased evidence proxy. No literal Bayes Factors (ADR-0001).
   parameters the additive predictor targets. Supplies `param_count`, parameter
   link/transforms, and the log-likelihood. The family models **aleatoric**
   uncertainty; the Bayesian weights add **epistemic** uncertainty on top.
+  Positivity links are `softplus(x) + EPS` (never `exp` / `transform_to`); every
+  family must pass the extreme pre-link (±1e4) finite-`log_prob` gate and supply
+  defined `dist.mean` / `dist.variance` for the variance decomposition.
+  **Family tiers:** core = Normal, StudentT, Gamma, **Johnson's SU** (custom
+  `Distribution` subclass, **scipy `johnsonsu` parameterization** —
+  `z = γ + δ·arcsinh((y−ξ)/λ)` — with closed-form moments, reference-tested
+  against scipy), NegativeBinomial (discrete decomposition case), and **Beta**
+  (promoted: the benchmark panel includes bounded-response datasets). LogNormal /
+  Weibull are torch-native quick adds, landed one at a time only when an
+  experiment needs them; zero-inflated / GEV deferred.
 - **Aleatoric vs epistemic uncertainty** — aleatoric = irreducible noise in the
   response, captured by the family. Epistemic = uncertainty about the learned
   effects, captured by the posterior over weights. dune-bayes models both.
+- **Variance decomposition (disentanglement)** — the law-of-total-variance split
+  of the posterior predictive: **aleatoric = E_θ[Var(y|θ)]** (mean over posterior
+  draws of the family variance), **epistemic = Var_θ[E(y|θ)]** (variance over
+  posterior draws of the family mean). Computed generically from each draw's
+  `dist.mean` / `dist.variance` — every registered family must produce a
+  distribution where these are defined, or document its infinity region.
+  Infinite aleatoric variance (e.g. StudentT with df ≤ 2) is surfaced **honestly**
+  (`inf` + a warning naming the cause), never clamped; `StudentTFamily` takes a
+  `df_min` arg (default keeps df > 1) so finite-variance experiments can pin
+  `df_min=2`. This decomposition is the package's core scientific claim.
 - **Inference engine** — the method that turns priors + likelihood into a
   posterior. Decided: **mean-field variational inference** (see ADR-0001).
+  **HMC/NUTS is validation-only**: a NumPyro/JAX reimplementation of one small
+  instance (fixed prior tier) living in `experiments/`, never a runtime
+  dependency; a shared log-joint fixture asserts the torch and JAX model
+  definitions agree before bands are compared. Expected result: VI bands sit
+  inside HMC bands with matching centers (mean-field narrowness, ADR-0001).
 - **ELBO** — evidence lower bound; the training objective = NLL + weight-KL/N.
   Doubles as a (biased) model-evidence proxy.
 - **`VariationalDense`** — the single in-house atom every Bayesian shape function
   is built from: a thin **PyTorch `nn.Module`** with a mean-field Normal weight
   posterior (`loc` + softplus `scale`), a prior set by **serializable config** (a
   `prior_scale` float or a hierarchical-scale handle, never a closure), KL
-  collected explicitly by walking the module tree, and an internal flipout-style
-  estimator flag for variance reduction. Owning the atom (rather than a stock
+  collected explicitly by walking the module tree, and a **local-reparameterization
+  estimator** (`local_reparam`, on by default for training; posterior sampling
+  always uses coherent global weight draws — ADR-0007). Owning the atom (rather than a stock
   library layer) is what gives flexible per-feature/hierarchical priors (ADR-0002)
   **and** variance reduction **and** clean save/load (`state_dict` + config dict —
   no weight-name-collision failure mode). On the legacy TF stack this layer was a
@@ -144,6 +170,15 @@ secondary, biased evidence proxy. No literal Bayes Factors (ADR-0001).
   `feature_dropout=0`** when Bayesian nets are present, so epistemic uncertainty
   isn't conflated with dropout noise. Both remain **fully user-configurable** for
   users who want dropout-style Bayesian nets anyway.
+- **Coverage evaluation (simulations)** — credible-band quality is **measured,
+  reported, and explained — never asserted as "correct."** Mean-field VI is
+  expected to under-cover (ADR-0001's accepted narrowness); simulation studies
+  report empirical coverage per distribution parameter at nominal 50/80/90/95,
+  and the HMC-agreement experiment quantifies the mean-field shrinkage
+  (VI-vs-NUTS band-width ratio). No post-hoc band inflation/recalibration in v1.
+  Recovery comparisons use **centered truth vs centered posterior draws** (shape
+  functions are identified only up to level; the intercept's coverage is
+  assessed separately).
 - **Effect plot vs response plot (band-by-view)** — *per-feature effect plots*
   show a **centered, epistemic-only** credible ribbon (each posterior-sampled
   curve mean-centered over the data before quantiles; isolates shape uncertainty;
