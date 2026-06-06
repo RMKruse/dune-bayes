@@ -10,6 +10,11 @@ Design:
     Shape functions may be Bayesian (BayesianMLP) or deterministic; the latter
     contribute zero KL (degenerate zero-variance contributors, CONTEXT.md).
   - family: callable with .param_count that maps (batch, param_count) → Distribution.
+  - intercept: a model-owned BayesianIntercept (issue 0010) holds the overall
+    level, one scalar per distributional parameter. Shape functions ship
+    bias-free output layers ("intercept handled by BayesianIntercept"); this is
+    the model honoring that contract, so mean-centred effect plots absorb the
+    level into a separately-reportable posterior instead of hidden-layer biases.
   - n_obs: training-set size N for the KL/N weighting. May be provided at
     construction or inferred from the target during fit().
   - feature_dropout: rate at which feature contributions are randomly zeroed.
@@ -30,7 +35,12 @@ from typing import Any
 import torch
 import torch.nn as nn
 
-from neural_bamlss.layers import VariationalDense, collect_kl, set_kl_beta
+from neural_bamlss.layers import (
+    BayesianIntercept,
+    VariationalDense,
+    collect_kl,
+    set_kl_beta,
+)
 
 
 def _has_bayesian_nets(formula: dict[str, nn.Module]) -> bool:
@@ -56,6 +66,9 @@ class BayesianNAMLSS(nn.Module):
         feature_dropout: Fraction of feature contributions randomly zeroed
             per forward pass. Defaults to 0.0 when any Bayesian net is present
             (weight posterior supplies the required stochasticity).
+        intercept_mode: ``"variational"`` (default) for a mean-field Gaussian
+            posterior over the intercept; ``"point"`` for a deterministic
+            level with no KL contribution (issue 0010).
     """
 
     def __init__(
@@ -64,6 +77,7 @@ class BayesianNAMLSS(nn.Module):
         family: Any,
         n_obs: int | None = None,
         feature_dropout: float | None = None,
+        intercept_mode: str = "variational",
     ) -> None:
         super().__init__()
         self.feature_names: list[str] = list(formula.keys())
@@ -73,6 +87,15 @@ class BayesianNAMLSS(nn.Module):
         self.nets = nn.ModuleDict(formula)
         self.family = family
         self.n_obs: int | None = int(n_obs) if n_obs is not None else None
+        # Model-owned intercept (issue 0010): shape functions drop their output
+        # bias so the overall level — and its uncertainty — accumulates here.
+        # When n_obs arrives late (inferred in fit()), the divisor is rewired
+        # there to keep the KL/N weighting consistent (ADR-0001).
+        self.intercept = BayesianIntercept(
+            units=family.param_count,
+            kl_divisor=float(self.n_obs) if self.n_obs is not None else 1.0,
+            mode=intercept_mode,
+        )
 
         if feature_dropout is None:
             # 0.01 is NAMpy's default; 0.0 when weight posterior supplies stochasticity.
@@ -89,6 +112,7 @@ class BayesianNAMLSS(nn.Module):
         family: Any,
         n_obs: int | None = None,
         feature_dropout: float | None = None,
+        intercept_mode: str = "variational",
         data: Any = None,
     ) -> "BayesianNAMLSS":
         """Construct a BayesianNAMLSS from a formula string (issue 0016).
@@ -108,6 +132,7 @@ class BayesianNAMLSS(nn.Module):
             family: Family object with .param_count, as in __init__.
             n_obs: As in __init__.
             feature_dropout: As in __init__.
+            intercept_mode: As in __init__.
             data: Optional DataModule (issue 0022); supplies n_obs from the
                 training data so KL/N needs no explicit n_obs argument.
 
@@ -128,6 +153,7 @@ class BayesianNAMLSS(nn.Module):
             family=family,
             n_obs=n_obs,
             feature_dropout=feature_dropout,
+            intercept_mode=intercept_mode,
         )
         model.response = parsed.response
         return model
@@ -156,8 +182,9 @@ class BayesianNAMLSS(nn.Module):
                 ``X["x1"]`` and ``X["x2"]`` along the feature dimension.
 
         Returns:
-            Summed predictor tensor of shape (batch, param_count). Stochastic
-            when Bayesian nets are present (one reparameterization draw).
+            Summed predictor tensor of shape (batch, param_count), including
+            the model intercept. Stochastic when Bayesian components are
+            present (one reparameterization draw).
         """
         contribs = [
             self.nets[name](self._get_input(X, name)) for name in self.feature_names
@@ -179,7 +206,10 @@ class BayesianNAMLSS(nn.Module):
                 )
             )
             stacked = stacked * mask * len(contribs) / mask.sum().clamp(min=1.0)
-        return stacked.sum(dim=0)  # (batch, param_count)
+        # Intercept is added outside feature dropout: it is the overall level,
+        # not a feature contribution. (units,) broadcasts over the batch dim.
+        intercept: torch.Tensor = self.intercept()
+        return stacked.sum(dim=0) + intercept  # (batch, param_count)
 
     def forward(self, X: dict[str, torch.Tensor]) -> torch.distributions.Distribution:
         """Single stochastic forward pass.
@@ -274,6 +304,10 @@ class BayesianNAMLSS(nn.Module):
             raise TypeError("fit() requires y unless X is a DataModule")
         if self.n_obs is None:
             self.n_obs = int(y.shape[0])
+            # Shape functions own their kl_divisor at construction; the
+            # model-owned intercept is the one layer whose KL/N weighting the
+            # model must keep consistent when N arrives late (ADR-0001).
+            self.intercept.kl_divisor = float(self.n_obs)
 
         opt = torch.optim.Adam(self.parameters(), lr=lr)
         history: dict[str, list[float]] = {"loss": [], "nll": [], "kl": []}
@@ -384,6 +418,9 @@ class BayesianNAMLSS(nn.Module):
             "n_obs": self.n_obs,
             "feature_dropout": self.feature_dropout,
             "feature_names": self.feature_names,
+            # Point-mode intercepts have no rho parameter, so the mode must be
+            # restored before load_state_dict for the key sets to match.
+            "intercept_mode": self.intercept.mode,
         }
         torch.save(checkpoint, path)
 
@@ -415,6 +452,7 @@ class BayesianNAMLSS(nn.Module):
             family=family,
             n_obs=checkpoint["n_obs"],
             feature_dropout=checkpoint["feature_dropout"],
+            intercept_mode=checkpoint["intercept_mode"],
         )
         model.load_state_dict(checkpoint["state_dict"])
         return model

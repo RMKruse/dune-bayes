@@ -12,7 +12,7 @@ import torch
 import torch.nn as nn
 
 from neural_bamlss.families import NormalFamily
-from neural_bamlss.layers import collect_kl
+from neural_bamlss.layers import BayesianIntercept, collect_kl
 from neural_bamlss.model import BayesianNAMLSS
 from neural_bamlss.shapes import BayesianMLP
 
@@ -232,11 +232,13 @@ def test_partial_bayesian_zero_kl_from_deterministic(family):
     )
     model(X)
 
-    kl_from_bayesian_only = collect_kl(bayesian_net)
+    kl_from_bayesian_net = collect_kl(bayesian_net)
     kl_total = collect_kl(model)
 
-    # Full-model walk finds only the Bayesian subnet's KL (deterministic has none).
-    assert kl_total.item() == pytest.approx(kl_from_bayesian_only.item(), rel=1e-5)
+    # Full-model walk = Bayesian subnet + model intercept; the deterministic
+    # term contributes exactly nothing.
+    expected = kl_from_bayesian_net.item() + model.intercept.kl.item()
+    assert kl_total.item() == pytest.approx(expected, rel=1e-5)
     assert kl_total.item() > 0.0
 
 
@@ -331,6 +333,10 @@ def _constant_contribution_model(family, feature_dropout):
     only take values in {0, 2, 3, 4}: both kept → 3, only x1 → 1·2/1 = 2,
     only x2 → 2·2/1 = 4, both dropped → 0.  The pre-fix bug (mask never
     applied to individual contributions) could only ever produce {0, 3}.
+
+    Point-mode intercept (zero-init, deterministic) keeps the contribution
+    arithmetic exact for the set-of-locs assertion; a variational intercept
+    would add reparameterization noise to every draw.
     """
     net1 = nn.Linear(IN, family.param_count, bias=False)
     net2 = nn.Linear(IN, family.param_count, bias=False)
@@ -342,6 +348,7 @@ def _constant_contribution_model(family, feature_dropout):
         family=family,
         n_obs=N_OBS,
         feature_dropout=feature_dropout,
+        intercept_mode="point",
     )
 
 
@@ -414,3 +421,90 @@ def test_forward_is_family_of_predict_params(multi_feature_model, X_multi, famil
     dist_direct = family(model.predict_params(X_multi))
     assert torch.equal(dist_forward.mean, dist_direct.mean)
     assert torch.equal(dist_forward.stddev, dist_direct.stddev)
+
+
+# ── 9. model-level intercept — the contract the shape functions rely on ───────
+# Shape functions ship bias-free output layers ("intercept handled by
+# BayesianIntercept"); these tests pin the model's side of that contract
+# (issue 0010 wiring).
+
+
+def test_model_owns_intercept_per_distributional_parameter(
+    single_feature_model, family
+):
+    """The model owns a BayesianIntercept with one scalar per family parameter."""
+    assert isinstance(single_feature_model.intercept, BayesianIntercept)
+    assert single_feature_model.intercept.units == family.param_count
+
+
+def test_intercept_shifts_predictor(single_feature_model, X_single):
+    """Shifting the intercept location shifts the summed predictor by the same δ.
+
+    Same seed → identical reparameterization draws, so the only change between
+    the two passes is the intercept level.  atol=1e-5 covers float32
+    reassociation of the additive sum (not MC noise — draws are identical).
+    """
+    model = single_feature_model
+    model.eval()
+    torch.manual_seed(3)
+    before = model.predict_params(X_single)
+    with torch.no_grad():
+        model.intercept.loc += 5.0
+    torch.manual_seed(3)
+    after = model.predict_params(X_single)
+    assert torch.allclose(after, before + 5.0, atol=1e-5)
+
+
+def test_intercept_is_sole_kl_contributor_in_deterministic_formula(family):
+    """A deterministic-only formula still carries the intercept's KL.
+
+    The terms are degenerate zero-variance contributors (CONTEXT.md), so the
+    model total must equal the intercept's stash exactly — same tensor, no
+    float tolerance needed.
+    """
+    det_net = nn.Linear(IN, family.param_count, bias=False)
+    model = BayesianNAMLSS(formula={"x1": det_net}, family=family, n_obs=N_OBS)
+    model({"x1": torch.ones(BATCH, IN)})
+    kl = collect_kl(model)
+    assert kl.item() > 0.0
+    assert kl.item() == model.intercept.kl.item()
+
+
+def test_point_intercept_contributes_zero_kl(family):
+    """intercept_mode='point' restores the fully-deterministic zero-KL model."""
+    det_net = nn.Linear(IN, family.param_count, bias=False)
+    model = BayesianNAMLSS(
+        formula={"x1": det_net},
+        family=family,
+        n_obs=N_OBS,
+        intercept_mode="point",
+    )
+    model({"x1": torch.ones(BATCH, IN)})
+    assert collect_kl(model).item() == 0.0
+
+
+def test_intercept_kl_divisor_wired_from_n_obs(single_feature_model):
+    """n_obs given at construction becomes the intercept's KL/N divisor (ADR-0001)."""
+    assert single_feature_model.intercept.kl_divisor == float(N_OBS)
+
+
+def test_intercept_kl_divisor_updated_when_fit_infers_n_obs(family):
+    """fit() inferring n_obs must also rewire the intercept's KL/N divisor.
+
+    Shape functions own their kl_divisor at construction; the model-owned
+    intercept is the one layer whose divisor the model itself must keep
+    consistent when N arrives late.
+    """
+    torch.manual_seed(0)
+    g = torch.Generator().manual_seed(0)
+    X = {"x1": torch.randn(N_OBS, IN, generator=g)}
+    y = torch.randn(N_OBS, generator=g)
+    model = BayesianNAMLSS(
+        formula={
+            "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS)
+        },
+        family=family,  # n_obs deliberately omitted
+    )
+    assert model.intercept.kl_divisor == 1.0
+    model.fit(X, y, epochs=1)
+    assert model.intercept.kl_divisor == float(N_OBS)
