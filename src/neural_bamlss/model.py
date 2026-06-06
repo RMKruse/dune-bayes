@@ -118,7 +118,7 @@ class BayesianNAMLSS(nn.Module):
         feature_dropout: float | None = None,
         intercept_mode: str = "variational",
         data: Any = None,
-    ) -> "BayesianNAMLSS":
+    ) -> BayesianNAMLSS:
         """Construct a BayesianNAMLSS from a formula string (issue 0016).
 
         Parses an additive formula like
@@ -434,7 +434,7 @@ class BayesianNAMLSS(nn.Module):
         path: str | Path,
         formula: dict[str, nn.Module],
         family: Any,
-    ) -> "BayesianNAMLSS":
+    ) -> BayesianNAMLSS:
         """Load a BayesianNAMLSS from a checkpoint written by save().
 
         The caller must supply a formula with the same architecture as the
