@@ -529,3 +529,54 @@ def test_intercept_kl_divisor_updated_when_fit_infers_n_obs(family):
     assert model.intercept.kl_divisor == 1.0
     model.fit(X, y, epochs=1)
     assert model.intercept.kl_divisor == float(N_OBS)
+
+
+# ── predict_params sample-dimension pass (issue 0027 / GitHub #80) ───────────
+
+
+def test_predict_params_sample_dim_shape(family):
+    """Expanded (S, n, in) inputs yield an (S, n, param_count) summed predictor,
+    including interaction keys (concatenated along the last dim)."""
+    formula = {
+        "x1": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+        "x1:x2": BayesianMLP(
+            2 * IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+        ),
+    }
+    model = BayesianNAMLSS(formula=formula, family=family, n_obs=N_OBS)
+    model.eval()
+    S = 4
+    g = torch.Generator().manual_seed(11)
+    X = {
+        "x1": torch.randn(BATCH, IN, generator=g).expand(S, BATCH, IN),
+        "x2": torch.randn(BATCH, IN, generator=g).expand(S, BATCH, IN),
+    }
+    with torch.no_grad():
+        out = model.predict_params(X)
+    assert out.shape == (S, BATCH, family.param_count)
+
+
+def test_predict_params_sample_dim_intercept_is_fresh_per_draw(family):
+    """The intercept is part of the posterior draw — fresh per sample slice.
+
+    With deterministic shape functions, all cross-sample variation comes from
+    the variational intercept alone: identical slices would mean one intercept
+    draw was broadcast across the sample dimension (the issue-0027 violation).
+    """
+    from neural_bamlss.shapes import DeterministicMLP
+
+    torch.manual_seed(12)
+    formula = {"x1": DeterministicMLP(IN, family.param_count, hidden_dims=[8])}
+    model = BayesianNAMLSS(
+        formula=formula, family=family, n_obs=N_OBS, feature_dropout=0.0
+    )
+    model.eval()
+    S = 4
+    x = torch.randn(BATCH, IN).expand(S, BATCH, IN)
+    with torch.no_grad():
+        out = model.predict_params({"x1": x})
+    assert out.shape == (S, BATCH, family.param_count)
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s]), (
+            f"slice {s} equals slice 0 — intercept draw broadcast across samples"
+        )
