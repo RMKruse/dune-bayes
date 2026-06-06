@@ -1,4 +1,4 @@
-"""Last-layer-only Bayesian MLP shape function (ADR-0004, issue 0014 / GitHub #15).
+"""Last-layer-only Bayesian MLP shape function (ADR-0004, issues #15, #73).
 
 NeuralLinearMLP: deterministic hidden basis (nn.Linear) with a single variational
 output layer (VariationalDense). Cheaper and more stable than the fully-variational
@@ -19,6 +19,7 @@ import torch
 import torch.nn as nn
 
 from neural_bamlss.layers import VariationalDense
+from neural_bamlss.priors.prior_scale import PriorScale
 from neural_bamlss.utils import resolve_activation
 
 _DEFAULT_HIDDEN_DIMS: list[int] = [64, 64]
@@ -38,6 +39,13 @@ class NeuralLinearMLP(nn.Module):
             Defaults to [64, 64].
         prior_scale: Std of the N(0, prior_scale²) weight prior on the output
             VariationalDense.
+        prior: Optional prior-tier spec (ADR-0002, issue #73): a mode string
+            (``"fixed"`` | ``"empirical_bayes"`` | ``"hierarchical"``) or a
+            PriorScale config dict, applied to the output layer — the net's
+            only variational layer, so the one handle is still the per-net
+            smoothness scalar. ``prior_scale`` is its default scale and
+            ``kl_divisor`` is forwarded. Literal-friendly for formula kwargs.
+            None keeps the plain fixed-float prior.
         kl_divisor: KL term denominator — set to N (training-set size).
         flipout: Use the local-reparameterization estimator for the output layer
             (ADR-0004).
@@ -53,6 +61,7 @@ class NeuralLinearMLP(nn.Module):
         param_count: int,
         hidden_dims: list[int] | None = None,
         prior_scale: float = 1.0,
+        prior: str | dict | None = None,
         kl_divisor: float = 1.0,
         flipout: bool = False,
         activation: str = "relu",
@@ -66,12 +75,23 @@ class NeuralLinearMLP(nn.Module):
         else:
             self.hidden_dims = list(_DEFAULT_HIDDEN_DIMS)
         self.prior_scale = float(prior_scale)
+        # Copy dict specs so a caller mutating theirs can't skew get_config().
+        self.prior = dict(prior) if isinstance(prior, dict) else prior
         self.kl_divisor = float(kl_divisor)
         self.flipout = bool(flipout)
         # Resolved once here (validates the name); config keeps the string.
         self._act = resolve_activation(activation)
         self.activation = activation
         self.validate_args = bool(validate_args)
+
+        # One handle per net (ADR-0002 granularity) — held by the single
+        # variational layer; the handle stashes its own hyperprior KL.
+        if prior is not None:
+            self.prior_scale_handle: PriorScale | None = PriorScale.from_spec(
+                prior, scale=self.prior_scale, kl_divisor=self.kl_divisor
+            )
+        else:
+            self.prior_scale_handle = None
 
         hidden_layers: list[nn.Module] = []
         prev = self.in_features
@@ -85,6 +105,7 @@ class NeuralLinearMLP(nn.Module):
             prev,
             self.param_count,
             prior_scale=prior_scale,
+            prior_scale_handle=self.prior_scale_handle,
             kl_divisor=kl_divisor,
             flipout=flipout,
             activation=None,
@@ -116,6 +137,7 @@ class NeuralLinearMLP(nn.Module):
             "param_count": self.param_count,
             "hidden_dims": self.hidden_dims,
             "prior_scale": self.prior_scale,
+            "prior": self.prior,
             "kl_divisor": self.kl_divisor,
             "flipout": self.flipout,
             "activation": self.activation,
