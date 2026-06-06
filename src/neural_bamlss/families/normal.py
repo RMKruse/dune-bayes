@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from neural_bamlss.families.base import BaseFamily
+from neural_bamlss.utils import EPS
 
 
 class NormalFamily(BaseFamily):
@@ -35,21 +36,9 @@ class NormalFamily(BaseFamily):
             torch.distributions.Normal with batch_shape (batch,).
         """
         loc = params[..., 0]
-        # softplus enforces strict positivity (numerical rule 1); floor via
-        # 1e-6 to guard the corner case of very negative raw inputs.
-        scale = F.softplus(params[..., 1]) + 1e-6
+        # softplus enforces strict positivity (numerical rule 1); EPS floor
+        # guards the corner case of very negative raw inputs.
+        scale = F.softplus(params[..., 1]) + EPS
         return torch.distributions.Normal(
             loc=loc, scale=scale, validate_args=self.validate_args
         )
-
-    def log_prob(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-        """Pointwise Gaussian log-likelihood.
-
-        Args:
-            params: Raw network output, shape (batch, 2).
-            y: Observed responses, shape (batch,).
-
-        Returns:
-            Tensor of shape (batch,) with pointwise log p(y | params).
-        """
-        return self(params).log_prob(y)

@@ -3,7 +3,9 @@
 Every response family must expose:
   - param_count (int): number of raw network outputs consumed.
   - __call__(params) -> Distribution: apply per-parameter links, return distribution.
-  - log_prob(params, y) -> Tensor: pointwise log-likelihood.
+  - log_prob(params, y) -> Tensor: pointwise log-likelihood (concrete on the
+    base — it is always ``self(params).log_prob(y)``; families implement only
+    ``__call__``).
 
 Positivity transforms must route through softplus (numerical rule 1).
 validate_args follows the test-vs-hot-path convention (numerical rule 6).
@@ -20,7 +22,7 @@ class BaseFamily(ABC):
     """Abstract base for response-distribution families (ADR-0006, issue 0018).
 
     Subclasses must set ``param_count: int`` as a class attribute and implement
-    ``__call__`` and ``log_prob``.
+    ``__call__``; ``log_prob`` is inherited.
     """
 
     param_count: int
@@ -46,9 +48,11 @@ class BaseFamily(ABC):
             A torch.distributions.Distribution with batch_shape (batch,).
         """
 
-    @abstractmethod
     def log_prob(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Pointwise log-likelihood.
+
+        Stays in log-space via the distribution's ``log_prob`` (numerical
+        rule 2). Concrete here because it is identical for every family.
 
         Args:
             params: Raw network output, shape (batch, param_count).
@@ -57,3 +61,4 @@ class BaseFamily(ABC):
         Returns:
             Tensor of shape (batch,) with pointwise log p(y | params).
         """
+        return self(params).log_prob(y)
