@@ -32,12 +32,16 @@ IN = 1
 
 @pytest.fixture
 def det_model():
-    """Deterministic shape function — no weight stochasticity, zero KL."""
+    """Fully deterministic model — no weight stochasticity, zero KL.
+
+    Point-mode intercept (zero-init, deterministic) keeps every draw
+    identical, which the closed-form p_waic=0 reference depends on.
+    """
     layer = nn.Linear(IN, 2, bias=True)
     nn.init.zeros_(layer.weight)
     layer.bias.data = torch.tensor([0.5, -1.0])
     family = NormalFamily(validate_args=True)
-    return BayesianNAMLSS({"x": layer}, family, n_obs=N_OBS)
+    return BayesianNAMLSS({"x": layer}, family, n_obs=N_OBS, intercept_mode="point")
 
 
 @pytest.fixture
