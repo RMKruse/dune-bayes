@@ -68,9 +68,9 @@ def test_kl_matches_closed_form_reference(layer, x):
 
     # float32 machine eps ~1e-7; 1e-5 relative tolerance is conservative
     # (pure arithmetic, no MC noise).
-    assert float(layer.kl.detach()) == pytest.approx(
-        expected_kl, rel=1e-5
-    ), f"stashed kl={float(layer.kl.detach()):.6f} vs reference={expected_kl:.6f}"
+    assert float(layer.kl.detach()) == pytest.approx(expected_kl, rel=1e-5), (
+        f"stashed kl={float(layer.kl.detach()):.6f} vs reference={expected_kl:.6f}"
+    )
 
 
 # ── 3. set_kl_beta utility ───────────────────────────────────────────────────
@@ -126,7 +126,8 @@ class _NestedModel(nn.Module):
         )
 
     def forward(self, xs: list[torch.Tensor]) -> torch.Tensor:
-        return torch.stack([net(x) for net, x in zip(self.nets, xs)]).sum(0)
+        pairs = zip(self.nets, xs, strict=True)
+        return torch.stack([net(x) for net, x in pairs]).sum(0)
 
 
 def test_collect_kl_reaches_all_variational_layers():
@@ -168,9 +169,9 @@ def test_collect_kl_beta_zero_zeroes_total():
 def test_get_config_is_closure_free(layer):
     """get_config() contains only ints, floats, strings, and bools — no callables."""
     cfg = layer.get_config()
-    assert all(
-        not callable(v) for v in cfg.values()
-    ), f"callable values found in config: {[k for k, v in cfg.items() if callable(v)]}"
+    assert all(not callable(v) for v in cfg.values()), (
+        f"callable values found in config: {[k for k, v in cfg.items() if callable(v)]}"
+    )
 
 
 def test_from_config_preserves_hyperparameters():
@@ -259,9 +260,9 @@ def test_flipout_vanilla_agree_in_expectation():
     # abs=0.05: MC std_err ≈ σ_out/√T ≈ 0.1/√2000 ≈ 0.002 per element;
     # 0.05 gives 25× headroom while catching any genuine bias (which would be O(σ)).
     # rel tolerance is avoided because expected values can be near zero.
-    assert mean_vanilla == pytest.approx(
-        mean_flipout.numpy(), abs=0.05
-    ), "flipout and vanilla means diverged — they must agree in expectation"
+    assert mean_vanilla == pytest.approx(mean_flipout.numpy(), abs=0.05), (
+        "flipout and vanilla means diverged — they must agree in expectation"
+    )
 
 
 # ── 9. PriorScale handle — ADR-0002 tiers on the main path (issue #73) ────────
