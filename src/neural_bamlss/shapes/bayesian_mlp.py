@@ -1,4 +1,4 @@
-"""Fully-variational MLP shape function (ADR-0004, issue 0002 / GitHub #3).
+"""Fully-variational MLP shape function (ADR-0004, issues #3, #73).
 
 BayesianMLP: every dense layer is a VariationalDense so uncertainty propagates
 through the function shape, not just a final rescaling. Internal per-layer
@@ -10,12 +10,15 @@ Design:
     BayesianIntercept, keeping the additive decomposition clean).
   - No nn.Dropout: epistemic uncertainty must not be conflated with dropout noise
     (CONTEXT.md "Dropout interaction").
+  - prior=: one PriorScale handle per net, shared by every layer — ADR-0002's
+    one-smoothness-scalar-per-feature-net granularity (issue #73).
 """
 
 import torch
 import torch.nn as nn
 
 from neural_bamlss.layers import VariationalDense
+from neural_bamlss.priors.prior_scale import PriorScale
 
 _DEFAULT_HIDDEN_DIMS: list[int] = [64, 64]
 
@@ -33,6 +36,13 @@ class BayesianMLP(nn.Module):
             Defaults to [64, 64].
         prior_scale: Std of the N(0, prior_scale²) weight prior. Shared
             across all layers; per-layer override is future work (ADR-0002).
+        prior: Optional prior-tier spec (ADR-0002, issue #73): a mode string
+            (``"fixed"`` | ``"empirical_bayes"`` | ``"hierarchical"``) or a
+            PriorScale config dict. Builds ONE handle shared by every layer —
+            the per-feature-net smoothness scalar — with ``prior_scale`` as
+            its default scale and ``kl_divisor`` forwarded. Literal-friendly,
+            so it works verbatim as a formula kwarg. None keeps the plain
+            fixed-float prior.
         kl_divisor: KL term denominator — set to N (training-set size).
         flipout: Use the local-reparameterization estimator (ADR-0004).
         activation: Activation between hidden layers.
@@ -46,6 +56,7 @@ class BayesianMLP(nn.Module):
         param_count: int,
         hidden_dims: list[int] | None = None,
         prior_scale: float = 1.0,
+        prior: str | dict | None = None,
         kl_divisor: float = 1.0,
         flipout: bool = False,
         activation: str = "relu",
@@ -59,13 +70,28 @@ class BayesianMLP(nn.Module):
         else:
             self.hidden_dims = list(_DEFAULT_HIDDEN_DIMS)
         self.prior_scale = float(prior_scale)
+        # Copy dict specs so a caller mutating theirs can't skew get_config().
+        self.prior = dict(prior) if isinstance(prior, dict) else prior
         self.kl_divisor = float(kl_divisor)
         self.flipout = bool(flipout)
         self.activation = activation
         self.validate_args = bool(validate_args)
 
+        # One handle per net (ADR-0002 granularity), shared by every layer.
+        # In hierarchical mode each layer's forward draws its own s ~ q(s);
+        # each per-layer KL term is then an unbiased estimate of
+        # E_q(s) KL[q(w) ‖ p(w|s)], so the summed ELBO term stays unbiased —
+        # one smoothness scalar per net in expectation.
+        if prior is not None:
+            self.prior_scale_handle: PriorScale | None = PriorScale.from_spec(
+                prior, scale=self.prior_scale, kl_divisor=self.kl_divisor
+            )
+        else:
+            self.prior_scale_handle = None
+
         vd_kwargs = dict(
             prior_scale=prior_scale,
+            prior_scale_handle=self.prior_scale_handle,
             kl_divisor=kl_divisor,
             flipout=flipout,
             activation=activation,
@@ -84,6 +110,7 @@ class BayesianMLP(nn.Module):
                 prev,
                 self.param_count,
                 prior_scale=prior_scale,
+                prior_scale_handle=self.prior_scale_handle,
                 kl_divisor=kl_divisor,
                 flipout=flipout,
                 activation=None,
@@ -116,6 +143,7 @@ class BayesianMLP(nn.Module):
             "param_count": self.param_count,
             "hidden_dims": self.hidden_dims,
             "prior_scale": self.prior_scale,
+            "prior": self.prior,
             "kl_divisor": self.kl_divisor,
             "flipout": self.flipout,
             "activation": self.activation,
