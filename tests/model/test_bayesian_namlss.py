@@ -11,10 +11,10 @@ import pytest
 import torch
 import torch.nn as nn
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.layers import BayesianEmbedding, BayesianIntercept, collect_kl
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.layers import BayesianEmbedding, BayesianIntercept, collect_kl
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -563,7 +563,7 @@ def test_predict_params_sample_dim_intercept_is_fresh_per_draw(family):
     the variational intercept alone: identical slices would mean one intercept
     draw was broadcast across the sample dimension (the issue-0027 violation).
     """
-    from neural_bamlss.shapes import DeterministicMLP
+    from dune_bayes.shapes import DeterministicMLP
 
     torch.manual_seed(12)
     formula = {"x1": DeterministicMLP(IN, family.param_count, hidden_dims=[8])}

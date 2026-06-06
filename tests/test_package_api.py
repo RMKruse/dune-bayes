@@ -1,6 +1,6 @@
-"""Top-level package API: ``import neural_bamlss as nb`` exposes the headline names.
+"""Top-level package API: ``import dune_bayes as db`` exposes the headline names.
 
-CLAUDE.md promises the ``nb.``-style import surface; this pins it so a
+CLAUDE.md promises the ``db.``-style import surface; this pins it so a
 re-export can't silently vanish from ``__init__``.
 """
 
@@ -8,13 +8,13 @@ import importlib
 
 import pytest
 
-import neural_bamlss as nb
+import dune_bayes as db
 
 
-@pytest.mark.parametrize("name", sorted(nb.__all__))
+@pytest.mark.parametrize("name", sorted(db.__all__))
 def test_all_names_resolve(name: str) -> None:
     # Every advertised name must be an actual attribute, not a stale entry.
-    assert getattr(nb, name) is not None
+    assert getattr(db, name) is not None
 
 
 @pytest.mark.parametrize(
@@ -42,15 +42,15 @@ def test_all_names_resolve(name: str) -> None:
     ],
 )
 def test_headline_api_in_all(name: str) -> None:
-    assert name in nb.__all__
+    assert name in db.__all__
 
 
 def test_compare_function_shadows_subpackage() -> None:
-    # `nb.compare` is deliberately the function (the headline call, like
+    # `db.compare` is deliberately the function (the headline call, like
     # `az.compare`), while the subpackage stays importable for its other names.
-    assert callable(nb.compare)
-    comparison_mod = importlib.import_module("neural_bamlss.compare")
-    assert comparison_mod.waic is nb.waic
+    assert callable(db.compare)
+    comparison_mod = importlib.import_module("dune_bayes.compare")
+    assert comparison_mod.waic is db.waic
 
 
 @pytest.mark.parametrize(
@@ -58,4 +58,4 @@ def test_compare_function_shadows_subpackage() -> None:
     ["layers", "shapes", "sampling", "formula", "families", "data", "priors"],
 )
 def test_subpackages_still_importable(subpackage: str) -> None:
-    importlib.import_module(f"neural_bamlss.{subpackage}")
+    importlib.import_module(f"dune_bayes.{subpackage}")

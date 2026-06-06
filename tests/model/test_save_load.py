@@ -10,9 +10,9 @@ Four reference-test archetypes (CLAUDE.md):
 import pytest
 import torch
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
 

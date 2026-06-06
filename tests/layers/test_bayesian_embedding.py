@@ -14,8 +14,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers import BayesianEmbedding, collect_kl, set_kl_beta
-from neural_bamlss.priors import PriorScale
+from dune_bayes.layers import BayesianEmbedding, collect_kl, set_kl_beta
+from dune_bayes.priors import PriorScale
 
 NUM_EMBEDDINGS = 8
 EMBEDDING_DIM = 4
@@ -114,7 +114,7 @@ class _ModelWithEmbedding(nn.Module):
 
     def __init__(self) -> None:
         super().__init__()
-        from neural_bamlss.layers import VariationalDense
+        from dune_bayes.layers import VariationalDense
 
         self.embed = BayesianEmbedding(
             num_embeddings=NUM_EMBEDDINGS, embedding_dim=EMBEDDING_DIM

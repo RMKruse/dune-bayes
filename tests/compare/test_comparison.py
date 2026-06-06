@@ -14,11 +14,11 @@ import pytest
 import torch
 import torch.nn as nn
 
-from neural_bamlss.compare import compare, elbo, loo, to_inference_data, waic
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.shapes import BayesianMLP
-from neural_bamlss.utils import seed_everything
+from dune_bayes.compare import compare, elbo, loo, to_inference_data, waic
+from dune_bayes.families import NormalFamily
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.shapes import BayesianMLP
+from dune_bayes.utils import seed_everything
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -110,7 +110,7 @@ def test_to_inference_data_loglik_shape(bay_model, bay_data):
 
 def test_waic_returns_waic_data(det_model, det_data):
     """waic() returns a WaicData object with elpd, p, se attributes."""
-    from neural_bamlss.compare.comparison import WaicData
+    from dune_bayes.compare.comparison import WaicData
 
     X, y = det_data
     result = waic(det_model, X, y, T=20)
@@ -248,8 +248,8 @@ def test_elbo_sign(det_model, det_data):
 
 def test_no_bayes_factor_in_public_api():
     """compare module exposes no bayes_factor (ADR-0001, issue 0009 / GitHub #10)."""
-    import neural_bamlss.compare as compare_module
+    import dune_bayes.compare as compare_module
 
     assert not hasattr(compare_module, "bayes_factor"), (
-        "bayes_factor must not appear in neural_bamlss.compare (ADR-0001)"
+        "bayes_factor must not appear in dune_bayes.compare (ADR-0001)"
     )

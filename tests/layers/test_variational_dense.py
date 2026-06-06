@@ -14,7 +14,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from neural_bamlss.layers import VariationalDense, collect_kl, set_kl_beta
+from dune_bayes.layers import VariationalDense, collect_kl, set_kl_beta
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -275,7 +275,7 @@ def test_kl_with_empirical_bayes_handle_matches_closed_form():
     round-trip), making the closed-form reference deterministic.
     Tolerance rel=1e-5: pure float32 arithmetic, no MC noise.
     """
-    from neural_bamlss.priors import PriorScale
+    from dune_bayes.priors import PriorScale
 
     torch.manual_seed(3)
     handle = PriorScale(mode="empirical_bayes", scale=0.7)
@@ -295,7 +295,7 @@ def test_eb_handle_receives_gradient_through_dense_kl():
     ADR-0002: empirical Bayes learns the per-feature smoothness by optimizing
     the prior scale through the ELBO; the KL term is where that gradient lives.
     """
-    from neural_bamlss.priors import PriorScale
+    from dune_bayes.priors import PriorScale
 
     torch.manual_seed(4)
     handle = PriorScale(mode="empirical_bayes", scale=1.0)
@@ -316,7 +316,7 @@ def test_shared_handle_hyperprior_counted_once_by_collect_kl():
     (a double-count would add kl_ps twice).  rel=1e-5: float32, no MC noise in
     the decomposition (the sampled s is already inside the stashed values).
     """
-    from neural_bamlss.priors import PriorScale
+    from dune_bayes.priors import PriorScale
 
     torch.manual_seed(5)
     handle = PriorScale(mode="hierarchical", hyperprior="inverse_gamma")
@@ -426,7 +426,7 @@ def test_sample_dim_flipout_slices_are_independent_draws():
 
 def test_round_trip_with_prior_scale_config_max_delta_zero(tmp_path):
     """config + state_dict round-trip restores a handle-carrying layer exactly."""
-    from neural_bamlss.priors import PriorScale
+    from dune_bayes.priors import PriorScale
 
     torch.manual_seed(6)
     handle = PriorScale(mode="empirical_bayes", scale=0.5, kl_divisor=64.0)

@@ -10,10 +10,10 @@ Acceptance criteria tested here:
 import pytest
 import torch
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.layers.variational_dense import VariationalDense
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.layers.variational_dense import VariationalDense
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.shapes import BayesianMLP
 
 # ── constants ─────────────────────────────────────────────────────────────────
 
@@ -50,7 +50,7 @@ def X_y():
 
 def _full_kl_reference(model, X):
     """Return the KL produced by a single forward pass with β=1 (no warm-up scaling)."""
-    from neural_bamlss.layers import collect_kl, set_kl_beta
+    from dune_bayes.layers import collect_kl, set_kl_beta
 
     set_kl_beta(model, 1.0)
     model(X)

@@ -12,7 +12,7 @@ TensorFlow/TFP. Read "tfp variational Dense layers" below as the in-house PyTorc
 
 ## Context
 
-neural-bamlss replaces NAMpy's deterministic feature networks with Bayesian ones.
+dune-bayes replaces NAMpy's deterministic feature networks with Bayesian ones.
 The user's goals, in priority order, are: (1) epistemic uncertainty / credible
 intervals on each feature's effect; (2) priors acting as principled
 regularization, most valuable on small data; (3) a principled Bayesian

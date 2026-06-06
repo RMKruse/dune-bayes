@@ -1,9 +1,10 @@
-# neural-bamlss
+# DUNE — Distributional Uncertainty in Neural-additive Estimation
 
 Bayesian additive models for location, scale, and shape — neural shape
-functions with mean-field variational inference, in PyTorch.
+functions with mean-field variational inference, in PyTorch. Distributed
+as the `dune-bayes` package (`import dune_bayes`).
 
-`neural-bamlss` is the neural analog of the
+`dune-bayes` is the neural analog of the
 [BAMLSS](https://cran.r-project.org/package=bamlss) R package. Each feature
 gets its own small neural network (a *shape function*) that contributes to
 **every parameter** of a response distribution (location *and* scale *and*
@@ -33,8 +34,8 @@ deprecation. Python 3.12+, CPU by default, CUDA opt-in.
 Not yet on PyPI. Install from a clone (we use [uv](https://docs.astral.sh/uv/)):
 
 ```sh
-git clone git@github.com:RMKruse/neural-bamlss.git
-cd neural-bamlss
+git clone git@github.com:RMKruse/dune-bayes.git
+cd dune-bayes
 uv pip install -e .
 ```
 
@@ -42,11 +43,11 @@ uv pip install -e .
 
 ```python
 import torch
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.sampling import sample_effects
-from neural_bamlss.plotting import plot_effect_ribbon
-from neural_bamlss.compare import compare
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.families import NormalFamily
+from dune_bayes.sampling import sample_effects
+from dune_bayes.plotting import plot_effect_ribbon
+from dune_bayes.compare import compare
 
 # Toy data: nonlinear effect on the mean, Gaussian noise.
 n = 500
@@ -91,7 +92,7 @@ effect, with partial pooling of rare levels. Families shipped so far:
 
 ## Citing
 
-There is no neural-bamlss paper yet. If you use the package, please cite the
+There is no dune-bayes paper yet. If you use the package, please cite the
 repository, and the BAMLSS framework it builds on:
 
 > Umlauf, N., Klein, N., & Zeileis, A. (2018). BAMLSS: Bayesian additive

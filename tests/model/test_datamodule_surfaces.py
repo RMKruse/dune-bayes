@@ -8,9 +8,9 @@ import pandas as pd
 import pytest
 import torch
 
-from neural_bamlss.data import DataModule
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.model import BayesianNAMLSS
+from dune_bayes.data import DataModule
+from dune_bayes.families import NormalFamily
+from dune_bayes.model import BayesianNAMLSS
 
 # ── constants ─────────────────────────────────────────────────────────────────
 

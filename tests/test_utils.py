@@ -11,7 +11,7 @@ import random
 import numpy as np
 import torch
 
-from neural_bamlss.utils import seed_everything
+from dune_bayes.utils import seed_everything
 
 
 def test_torch_stream_reproducible_after_reseed():

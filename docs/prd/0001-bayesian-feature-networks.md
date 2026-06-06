@@ -1,4 +1,4 @@
-# PRD 0001: neural-bamlss — Bayesian feature networks for distributional additive models
+# PRD 0001: dune-bayes — Bayesian feature networks for distributional additive models
 
 Status: Draft · Date: 2026-06-03
 
@@ -21,7 +21,7 @@ I fit interpretable distributional additive models (NAMLSS — Neural Additive M
 
 ## Solution
 
-A dedicated package, **neural-bamlss** — the neural analog of the BAMLSS R package — that reuses NAMpy's machinery (formula parser, `ShapeFunctionRegistry`, families, `DataModule`, plotting) but replaces the deterministic feature networks with **Bayesian** feature networks. Each feature's effect on each distributional parameter now carries a posterior, so I get:
+A dedicated package, **dune-bayes** — the neural analog of the BAMLSS R package — that reuses NAMpy's machinery (formula parser, `ShapeFunctionRegistry`, families, `DataModule`, plotting) but replaces the deterministic feature networks with **Bayesian** feature networks. Each feature's effect on each distributional parameter now carries a posterior, so I get:
 
 1. **Credible intervals around every feature's shape function** (the headline payoff).
 2. **Priors as principled regularization** that pay off most on small data, with the per-feature prior scale playing the role of an mgcv smoothing parameter λ.

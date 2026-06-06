@@ -14,7 +14,7 @@ import pytest
 import torch
 from sklearn.preprocessing import StandardScaler
 
-from neural_bamlss.data import DataModule
+from dune_bayes.data import DataModule
 
 # ── constants ─────────────────────────────────────────────────────────────────
 

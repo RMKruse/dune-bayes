@@ -4,9 +4,9 @@ Boundary tests: joint-net parsing, combined-key contract, mixed formulas,
 kwarg forwarding, and end-to-end training. Asserts external behavior only.
 """
 
-from neural_bamlss.families import NormalFamily
-from neural_bamlss.formula import build_formula, parse_formula
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.families import NormalFamily
+from dune_bayes.formula import build_formula, parse_formula
+from dune_bayes.shapes import BayesianMLP
 
 # ── tracer bullet: single interaction term ────────────────────────────────────
 
@@ -69,7 +69,7 @@ def test_interaction_kwargs_from_first_factor_are_forwarded():
 def test_mixed_interaction_formula_trains_end_to_end():
     import torch
 
-    from neural_bamlss.model import BayesianNAMLSS
+    from dune_bayes.model import BayesianNAMLSS
 
     torch.manual_seed(0)
     X = {

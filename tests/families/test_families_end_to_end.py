@@ -10,10 +10,10 @@ import arviz as az
 import pytest
 import torch
 
-from neural_bamlss.compare import loo, waic
-from neural_bamlss.families import GammaFamily, StudentTFamily
-from neural_bamlss.model import BayesianNAMLSS
-from neural_bamlss.shapes import BayesianMLP
+from dune_bayes.compare import loo, waic
+from dune_bayes.families import GammaFamily, StudentTFamily
+from dune_bayes.model import BayesianNAMLSS
+from dune_bayes.shapes import BayesianMLP
 
 N_OBS = 64
 IN = 1

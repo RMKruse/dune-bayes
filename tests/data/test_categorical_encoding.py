@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 import torch
 
-from neural_bamlss.data import DataModule
+from dune_bayes.data import DataModule
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ def test_unseen_level_at_transform_raises_with_level_name(color_df):
 
 
 def test_end_to_end_categorical_feeds_bayesian_embedding():
-    from neural_bamlss.layers import BayesianEmbedding
+    from dune_bayes.layers import BayesianEmbedding
 
     df = pd.DataFrame(
         {

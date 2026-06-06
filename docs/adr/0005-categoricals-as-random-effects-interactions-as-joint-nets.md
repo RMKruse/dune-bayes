@@ -47,7 +47,7 @@ with many levels and few rows per level.
 **Positive**
 
 - Per-level credible intervals and automatic partial pooling — a direct fidelity
-  win for the "neural-BAMLSS" identity and a strong small-data behavior (goal 2).
+  win for the "neural analog of BAMLSS" identity and a strong small-data behavior (goal 2).
 - Interactions cost nothing new architecturally; they reuse the joint-net path and
   the single sampling workhorse.
 - Uniform story: every weight in the model, including embeddings, is a
