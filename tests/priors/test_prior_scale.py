@@ -66,8 +66,8 @@ def test_fixed_forward_returns_configured_scale(fixed):
 
 
 def test_fixed_kl_is_zero(fixed):
-    """Fixed tier: kl() returns scalar zero — no hyperprior contribution."""
-    kl = fixed.kl()
+    """Fixed tier: hyperprior_kl() returns scalar zero — no hyperprior contribution."""
+    kl = fixed.hyperprior_kl()
     assert kl.shape == ()
     assert float(kl) == pytest.approx(0.0, abs=1e-7)
 
@@ -114,8 +114,8 @@ def test_eb_gradients_flow_through_scale(eb):
 
 
 def test_eb_kl_is_zero(eb):
-    """EB tier: no hyperprior → kl() returns zero."""
-    kl = eb.kl()
+    """EB tier: no hyperprior → hyperprior_kl() returns zero."""
+    kl = eb.hyperprior_kl()
     assert kl.shape == ()
     assert float(kl) == pytest.approx(0.0, abs=1e-7)
 
@@ -207,7 +207,7 @@ def test_hier_ig_kl_matches_closed_form_reference():
         ps.loc_s.fill_(mu_val)
         ps.rho_s.fill_(rho_val)
 
-    kl_computed = float(ps.kl().detach())
+    kl_computed = float(ps.hyperprior_kl().detach())
     kl_reference = _kl_ig_reference(mu_val, sigma_val, alpha0, beta0)
 
     # Pure arithmetic (no randomness in IG KL) — rel=1e-4 is conservative for float32.
@@ -217,10 +217,10 @@ def test_hier_ig_kl_matches_closed_form_reference():
 
 
 def test_hier_ig_kl_is_positive(hier_ig):
-    """Hierarchical IG: kl() is non-negative (KL divergence property)."""
+    """Hierarchical IG: hyperprior_kl() is non-negative (KL divergence property)."""
     # Closed-form KL — deterministic, not MC. Always >= 0.
     torch.manual_seed(5)
-    kl = float(hier_ig.kl().detach())
+    kl = float(hier_ig.hyperprior_kl().detach())
     assert kl >= 0.0
 
 
@@ -290,7 +290,7 @@ def test_hier_hc_kl_mc_converges_to_reference():
 
     torch.manual_seed(7)
     T = 2000
-    kl_samples = [float(ps.kl().detach()) for _ in range(T)]
+    kl_samples = [float(ps.hyperprior_kl().detach()) for _ in range(T)]
     kl_mean = sum(kl_samples) / T
 
     reference = _kl_half_cauchy_mc_reference(mu_val, sigma_val, tau_val)
@@ -307,7 +307,7 @@ def test_hier_hc_kl_is_positive_on_average():
 
     torch.manual_seed(99)
     ps = PriorScale(mode="hierarchical", hyperprior="half_cauchy", tau=1.0)
-    kl_mean = sum(float(ps.kl().detach()) for _ in range(500)) / 500
+    kl_mean = sum(float(ps.hyperprior_kl().detach()) for _ in range(500)) / 500
     assert kl_mean > 0.0
 
 
@@ -340,7 +340,71 @@ def test_hierarchical_state_dict_round_trip(tmp_path):
     assert max_delta == 0.0, f"max|Δw| = {max_delta:.2e}"
 
 
-# ── 6. validation ─────────────────────────────────────────────────────────────
+# ── 6. VariationalLayer contract (issue #73) ─────────────────────────────────
+#
+# PriorScale stashes its own hyperprior KL on forward(), so collect_kl()
+# reaches it through the module walk — and counts a shared handle exactly
+# once, because nn.Module.modules() deduplicates shared submodules.
+
+
+def test_hierarchical_forward_stashes_hyperprior_kl_for_collect_kl():
+    """After forward(), .kl holds β·hyperprior_kl/kl_divisor and collect_kl sees it.
+
+    IG hyperprior: closed-form KL, deterministic — exact comparison possible.
+    Tolerance rel=1e-5: pure float32 arithmetic, no MC noise.
+    """
+    from neural_bamlss.layers import collect_kl
+    from neural_bamlss.priors import PriorScale
+
+    mu_val, sigma_val, alpha0, beta0 = 0.3, 0.4, 2.0, 1.5
+    ps = PriorScale(
+        mode="hierarchical",
+        hyperprior="inverse_gamma",
+        alpha0=alpha0,
+        beta0=beta0,
+        kl_divisor=4.0,
+    )
+    rho_val = math.log(math.expm1(sigma_val))
+    with torch.no_grad():
+        ps.loc_s.fill_(mu_val)
+        ps.rho_s.fill_(rho_val)
+
+    ps()  # forward stashes the hyperprior KL
+
+    expected = _kl_ig_reference(mu_val, sigma_val, alpha0, beta0) / 4.0
+    assert float(ps.kl.detach()) == pytest.approx(expected, rel=1e-5)
+    assert float(collect_kl(ps).detach()) == pytest.approx(expected, rel=1e-5)
+
+
+def test_fixed_and_eb_forward_stash_zero_kl(fixed, eb):
+    """Fixed / EB tiers stash a structural zero on forward() — no hyperprior."""
+    fixed()
+    eb()
+    assert float(fixed.kl.detach()) == pytest.approx(0.0, abs=1e-7)
+    assert float(eb.kl.detach()) == pytest.approx(0.0, abs=1e-7)
+
+
+def test_set_kl_beta_scales_stashed_hyperprior_kl():
+    """set_kl_beta() reaches PriorScale — warm-up anneals the hyperprior KL too."""
+    from neural_bamlss.layers import set_kl_beta
+    from neural_bamlss.priors import PriorScale
+
+    ps = PriorScale(mode="hierarchical", hyperprior="inverse_gamma")
+    set_kl_beta(ps, 0.0)
+    ps()
+    assert float(ps.kl.detach()) == pytest.approx(0.0, abs=1e-7)
+
+
+def test_kl_divisor_round_trips_in_config():
+    """kl_divisor is part of the closure-free config round-trip."""
+    from neural_bamlss.priors import PriorScale
+
+    ps = PriorScale(mode="empirical_bayes", scale=0.5, kl_divisor=128.0)
+    rebuilt = PriorScale.from_config(ps.get_config())
+    assert rebuilt.kl_divisor == 128.0
+
+
+# ── 7. validation ─────────────────────────────────────────────────────────────
 
 
 def test_invalid_mode_raises():
@@ -359,7 +423,7 @@ def test_invalid_hyperprior_raises():
         PriorScale(mode="hierarchical", hyperprior="gamma")
 
 
-# ── 7. get_config is closure-free ────────────────────────────────────────────
+# ── 8. get_config is closure-free ────────────────────────────────────────────
 
 
 @pytest.mark.parametrize(
