@@ -213,3 +213,51 @@ def test_interaction_term_takes_preconcatenated_grid(family):
     samples = sample_effects(model, grid, T=T)
     assert set(samples.keys()) == {"x1:x2"}
     assert samples["x1:x2"].shape == (T, N_OBS, family.param_count)
+
+
+# ── 9: Vectorized sweep — chunking over T (issue 0027 / GitHub #80) ───────────
+
+
+def test_chunked_sweep_returns_full_t_with_independent_draws(
+    single_model, data_single, family
+):
+    """A chunk_size smaller than T still yields (T, n, param_count) with every
+    draw independent — including across chunk boundaries.
+
+    chunk_size is the internal memory knob: the sweep batches min(chunk, T)
+    draws per dispatch and concatenates. Identical slices anywhere would mean
+    a draw was broadcast instead of freshly sampled.
+    """
+    torch.manual_seed(21)
+    T, chunk = 10, 4  # chunks of 4, 4, 2 — exercises the ragged tail
+    samples = sample_effects(single_model, data_single, T=T, chunk_size=chunk)["x1"]
+    assert samples.shape == (T, N_OBS, family.param_count)
+    for t in range(1, T):
+        assert not torch.equal(samples[0], samples[t]), (
+            f"draw {t} equals draw 0 — broadcast instead of independent draws"
+        )
+
+
+def test_variance_across_t_consistent_with_loop(single_model, data_single):
+    """std across the T axis matches a per-draw loop reference (MC-convergence).
+
+    The loop below is the pre-issue-0027 implementation inlined as the
+    independent reference: T separate net(x) calls. Both estimates target the
+    same posterior std; with T=400 the sample-std rel error is ≈ 1/√(2T) ≈ 3.5%
+    per element and smaller for the element-mean compared here — rel=0.2 gives
+    wide MC headroom under the fixed seed while catching a wrong or collapsed
+    cross-draw variance.
+    """
+    torch.manual_seed(22)
+    T = 400
+    vec = sample_effects(single_model, data_single, T=T)["x1"]
+
+    net = single_model.nets["x1"]
+    x = data_single["x1"]
+    single_model.eval()
+    with torch.no_grad():
+        loop = torch.stack([net(x) for _ in range(T)], dim=0)
+
+    std_vec = vec.std(dim=0).mean()
+    std_loop = loop.std(dim=0).mean()
+    assert float(std_vec) == pytest.approx(float(std_loop), rel=0.2)
