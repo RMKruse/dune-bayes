@@ -26,6 +26,7 @@ from dataclasses import dataclass
 import torch
 
 from neural_bamlss.model import BayesianNAMLSS
+from neural_bamlss.utils import eval_mode
 
 T_PREDICT: int = 200
 T_EVAL: int = 1000
@@ -63,38 +64,32 @@ def draw_predictive(
         PredictiveDraws with summed_samples (T, n, param_count) and a
         MixtureSameFamily predictive with batch_shape (n,).
     """
-    was_training = model.training
-    model.eval()
-    try:
-        with torch.no_grad():
-            # T independent forward passes → summed predictor for each draw.
-            # predict_params is the single owner of predictor assembly
-            # (interaction keys, dropout — inert under eval(); issue 0060).
-            summed_samples = torch.stack(
-                [model.predict_params(X) for _ in range(T)], dim=0
-            )  # (T, n, param_count)
+    with eval_mode(model), torch.no_grad():
+        # T independent forward passes → summed predictor for each draw.
+        # predict_params is the single owner of predictor assembly
+        # (interaction keys, dropout — inert under eval(); issue 0060).
+        summed_samples = torch.stack(
+            [model.predict_params(X) for _ in range(T)], dim=0
+        )  # (T, n, param_count)
 
-            # Build MixtureSameFamily (ADR-0003).
-            # Permute (T, n, param_count) → (n, T, param_count) so the family
-            # sees T as the last batch dimension — required by MixtureSameFamily
-            # which indexes mixture components on the last batch axis.
-            params_batched = summed_samples.permute(1, 0, 2)  # (n, T, param_count)
-            component_dist = model.family(params_batched)  # batch_shape (n, T)
+        # Build MixtureSameFamily (ADR-0003).
+        # Permute (T, n, param_count) → (n, T, param_count) so the family
+        # sees T as the last batch dimension — required by MixtureSameFamily
+        # which indexes mixture components on the last batch axis.
+        params_batched = summed_samples.permute(1, 0, 2)  # (n, T, param_count)
+        component_dist = model.family(params_batched)  # batch_shape (n, T)
 
-            n = int(summed_samples.shape[1])
-            # Uniform mixture over T components; stays float32 (forward path).
-            mix_dist = torch.distributions.Categorical(
-                logits=torch.zeros(n, T, dtype=torch.float32)
-            )
-            predictive = torch.distributions.MixtureSameFamily(mix_dist, component_dist)
+        n = int(summed_samples.shape[1])
+        # Uniform mixture over T components; stays float32 (forward path).
+        mix_dist = torch.distributions.Categorical(
+            logits=torch.zeros(n, T, dtype=torch.float32)
+        )
+        predictive = torch.distributions.MixtureSameFamily(mix_dist, component_dist)
 
-            return PredictiveDraws(
-                summed_samples=summed_samples,
-                predictive=predictive,
-            )
-    finally:
-        if was_training:
-            model.train()
+        return PredictiveDraws(
+            summed_samples=summed_samples,
+            predictive=predictive,
+        )
 
 
 def pointwise_log_lik(
