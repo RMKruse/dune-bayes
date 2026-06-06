@@ -165,6 +165,19 @@ def test_load_preserves_feature_dropout(family, tmp_path):
     assert loaded.feature_dropout == pytest.approx(0.2)
 
 
+def test_load_rejects_mismatched_feature_names(fitted_model, family, tmp_path):
+    """load() with a formula whose feature names don't match the checkpoint
+    raises ValueError naming both sides — not a cryptic load_state_dict error."""
+    path = tmp_path / "model.pt"
+    fitted_model.save(path)
+    torch.manual_seed(99)
+    formula_wrong = {
+        "x2": BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS),
+    }
+    with pytest.raises(ValueError, match=r"x2.*x1|feature names"):
+        BayesianNAMLSS.load(path, formula=formula_wrong, family=family)
+
+
 # ── 5. full-model pickle round-trip — AC2 ────────────────────────────────────
 
 
