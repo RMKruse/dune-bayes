@@ -361,7 +361,7 @@ class DataModule:
         }
 
     @classmethod
-    def from_state(cls, state: dict[str, Any]) -> "DataModule":
+    def from_state(cls, state: dict[str, Any]) -> DataModule:
         """Reconstruct a DataModule from a saved state dict without refitting.
 
         Only the preprocessing state is restored.  ``features`` and
@@ -406,7 +406,7 @@ class DataModule:
         torch.save(self.get_state(), Path(path))
 
     @classmethod
-    def load_state(cls, path: Path | str) -> "DataModule":
+    def load_state(cls, path: Path | str) -> DataModule:
         """Load a DataModule from a state file written by ``save_state()``.
 
         Args:
