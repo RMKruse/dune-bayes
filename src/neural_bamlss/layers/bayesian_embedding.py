@@ -9,6 +9,13 @@ pooling) while common levels stay data-driven.
 
 A point-embedding fallback (mode="point") is available but not the default;
 it removes the per-level credible interval and the shrinkage behavior.
+
+Sampling is local-reparameterization style (issue 0027 / GitHub #80): each
+gathered row draws fresh per-element noise from its marginal posterior — the
+embedding analog of VariationalDense's flipout estimator. Same expectation and
+exact per-element marginals, lower gradient variance; an index tensor expanded
+along a leading sample dimension therefore yields independent posterior draws
+per slice, which is what the vectorized T-sweeps rely on.
 """
 
 from __future__ import annotations
@@ -100,8 +107,18 @@ class BayesianEmbedding(VariationalLayer):
         """
         if self.mode == "variational":
             scale = F.softplus(self.rho)  # (num_embeddings, embedding_dim)
-            sampled = self.loc + scale * torch.randn_like(self.loc)
-            out = sampled[idx]
+            # Local reparameterization (issue 0027 / GitHub #80): sample each
+            # gathered row from its marginal N(loc[idx], scale[idx]²) with
+            # fresh per-element noise — the embedding analog of the flipout
+            # estimator.  Per-element marginals are exact, so the ELBO, WAIC
+            # pointwise terms, ribbon quantiles, and the per-row predictive
+            # are unchanged; within-draw correlation across repeated levels is
+            # dropped (lower gradient variance, same expectation).  This is
+            # what makes an expanded (S, batch) idx yield S *independent*
+            # posterior draws in the vectorized sweeps with no shape
+            # convention on idx.
+            loc_g = self.loc[idx]
+            out = loc_g + scale[idx] * torch.randn_like(loc_g)
 
             # Shared prior scale s from the per-feature PriorScale handle —
             # passed as a tensor so its gradient path stays alive.  The handle
