@@ -25,8 +25,10 @@ from tests.support import concrete_families
 # family (positive reals ⊂ all reals), and close enough to the implied
 # location that no log_prob plateaus at FD-unresolvable magnitudes.  Each
 # family keeps only the ones its own support admits, so future families with
-# narrower supports need no hand-edit here.
-CANDIDATE_RESPONSES = [0.3, 0.7, 1.3, 2.5]
+# narrower supports need no hand-edit here.  The integer values exist for the
+# count families (NegativeBinomial, #95): discrete in y, but log_prob is
+# still smooth in the pre-link params, so gradcheck applies unchanged.
+CANDIDATE_RESPONSES = [0.3, 0.7, 1.0, 1.3, 2.5, 3.0]
 
 
 def _in_support_responses(family: BaseFamily, params: torch.Tensor) -> torch.Tensor:

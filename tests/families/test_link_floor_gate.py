@@ -17,7 +17,13 @@ import itertools
 import pytest
 import torch
 
-from dune_bayes.families import BaseFamily, GammaFamily, NormalFamily, StudentTFamily
+from dune_bayes.families import (
+    BaseFamily,
+    GammaFamily,
+    NegativeBinomialFamily,
+    NormalFamily,
+    StudentTFamily,
+)
 from tests.support import concrete_families
 
 # ±1e4 per the acceptance criteria; −104.0 is where float32 softplus
@@ -34,7 +40,12 @@ CANDIDATE_RESPONSES = [-50.0, -1.0, 1e-4, 0.01, 1.0, 50.0, 1e6]
 def test_subclass_walk_finds_all_registered_families() -> None:
     """The auto-discovery must cover every family the package exports."""
     found = set(concrete_families())
-    assert {NormalFamily, GammaFamily, StudentTFamily} <= found
+    assert {
+        NormalFamily,
+        GammaFamily,
+        StudentTFamily,
+        NegativeBinomialFamily,
+    } <= found
 
 
 @pytest.mark.parametrize("family_cls", concrete_families(), ids=lambda c: c.__name__)

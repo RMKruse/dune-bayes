@@ -29,6 +29,7 @@ def test_all_names_resolve(name: str) -> None:
         "StudentTFamily",
         "GammaFamily",
         "JohnsonSUFamily",
+        "NegativeBinomialFamily",
         "waic",
         "loo",
         "compare",
