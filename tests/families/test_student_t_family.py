@@ -43,19 +43,40 @@ class TestStudentTFamilyContract:
         torch.testing.assert_close(dist.scale, expected)
 
     def test_df_softplus_plus_one_link(self, family, params):
-        # df > 1 guarantees finite variance
+        # df > 1 STRICTLY guarantees a defined mean (variance needs df > 2;
+        # see df_min). EPS floor: bare softplus underflows to exact 0.0 in
+        # float32, and torch's StudentT mean is NaN at df == 1 (GitHub #91).
         dist = family(params)
-        expected = F.softplus(params[..., 2]) + 1.0
+        expected = F.softplus(params[..., 2]) + 1e-6 + 1.0
         torch.testing.assert_close(dist.df, expected)
         assert (dist.df > 1.0).all()
 
     def test_log_prob_matches_torch_reference(self, family, params, y):
         loc = params[..., 0]
         scale = F.softplus(params[..., 1]) + 1e-6
-        df = F.softplus(params[..., 2]) + 1.0
+        df = F.softplus(params[..., 2]) + 1e-6 + 1.0
         ref_dist = torch.distributions.StudentT(df=df, loc=loc, scale=scale)
         reference = ref_dist.log_prob(y)
         torch.testing.assert_close(family.log_prob(params, y), reference)
+
+    def test_df_min_pins_variance_finite(self, params):
+        """df_min=2.0 forces df > 2, so dist.variance is finite for ANY pre-link.
+
+        df > 1 (the default) only guarantees a finite mean; the variance of a
+        StudentT is finite iff df > 2 (issue 0091 / GitHub #91).
+        """
+        family = StudentTFamily(df_min=2.0, validate_args=True)
+        dist = family(params)
+        expected_df = F.softplus(params[..., 2]) + 1e-6 + 2.0
+        torch.testing.assert_close(dist.df, expected_df)
+        assert (dist.df > 2.0).all()
+        assert torch.isfinite(dist.variance).all()
+
+    def test_df_min_default_preserves_original_link(self, params):
+        """Default df_min=1.0 reproduces the pre-#91 link exactly (max|Δ| == 0)."""
+        dist_default = StudentTFamily(validate_args=True)(params)
+        dist_explicit = StudentTFamily(df_min=1.0, validate_args=True)(params)
+        torch.testing.assert_close(dist_default.df, dist_explicit.df, rtol=0, atol=0)
 
     def test_validate_args_rejects_nan_params(self):
         family_strict = StudentTFamily(validate_args=True)
