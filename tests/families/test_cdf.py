@@ -13,7 +13,7 @@ conventions), which is exactly where a scipy-mapping bug would live.
 
 import torch
 
-from dune_bayes.families import GammaFamily, StudentTFamily
+from dune_bayes.families import GammaFamily, NegativeBinomialFamily, StudentTFamily
 
 # MC tolerance: the empirical CDF at y is a binomial proportion with
 # SE = sqrt(p(1-p)/N) ≤ 0.5/sqrt(N); at N = 200_000 that is ≤ 0.0011, so
@@ -50,6 +50,34 @@ def test_student_t_cdf_matches_torch_sampler():
         ]
     )
     y = torch.tensor([0.8, -3.5, 1.0])
+
+    result = family.cdf(params, y)
+
+    expected = _mc_cdf_reference(family(params), y)
+    assert result.dtype == torch.float64
+    torch.testing.assert_close(result, expected, rtol=0.0, atol=_ATOL_MC)
+
+
+def test_negative_binomial_cdf_matches_torch_sampler():
+    """NegBin cdf agrees with the empirical CDF of torch's own draws.
+
+    The mapping hotspot (issue #95): scipy's nbinom success probability is
+    1 − torch's p (= sigmoid(−logits)) — a forgotten complement passes any
+    p ≈ 0.5 fixture, so the linked (μ, σ) here put p well away from 0.5 on
+    both sides (torch p = σμ/(1+σμ) ≈ 0.22, 0.56, 0.73). On integer support
+    the empirical P(X ≤ y) sits flat between jumps, so the MC reference
+    carries no boundary subtlety at integer y.
+    """
+    family = NegativeBinomialFamily(validate_args=True)
+    # Raw params softplus-linked: mean / dispersion strictly positive.
+    params = torch.tensor(
+        [
+            [2.0, -2.0],  # ≈ NBI(μ 2.13, σ 0.13) — near-Poisson, torch p ≈ 0.22
+            [0.5, 1.0],  # ≈ NBI(μ 0.97, σ 1.31) — torch p ≈ 0.56
+            [4.0, 0.0],  # ≈ NBI(μ 4.02, σ 0.69) — overdispersed, torch p ≈ 0.73
+        ]
+    )
+    y = torch.tensor([2.0, 0.0, 3.0])
 
     result = family.cdf(params, y)
 
