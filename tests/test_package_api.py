@@ -25,6 +25,7 @@ def test_all_names_resolve(name: str) -> None:
         "PriorScale",
         "seed_everything",
         "BaseFamily",
+        "BetaFamily",
         "NormalFamily",
         "StudentTFamily",
         "GammaFamily",
