@@ -25,6 +25,7 @@ from dune_bayes.families import (
     NormalFamily,
     StudentTFamily,
 )
+from dune_bayes.metrics import VarianceDecomposition, variance_decomposition
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.plotting import (
     plot_dist,
@@ -47,6 +48,7 @@ __all__ = [
     "NormalFamily",
     "PriorScale",
     "StudentTFamily",
+    "VarianceDecomposition",
     "__version__",
     "compare",
     "elbo",
@@ -59,5 +61,6 @@ __all__ = [
     "seed_everything",
     "surface_stats",
     "to_inference_data",
+    "variance_decomposition",
     "waic",
 ]
