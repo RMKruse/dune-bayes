@@ -16,7 +16,12 @@ import pytest
 import torch
 
 from dune_bayes.compare import loo, waic
-from dune_bayes.families import GammaFamily, JohnsonSUFamily, StudentTFamily
+from dune_bayes.families import (
+    GammaFamily,
+    JohnsonSUFamily,
+    NegativeBinomialFamily,
+    StudentTFamily,
+)
 from dune_bayes.families.johnson_su import JohnsonSU
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.shapes import BayesianMLP
@@ -238,3 +243,82 @@ class TestJohnsonSUFamilyEndToEnd:
         assert torch.isfinite(predictive.log_prob(y)).all()
         assert torch.isfinite(predictive.mean).all()
         assert predictive.sample((10,)).shape == (10, N_OBS)
+
+
+# ── NegativeBinomial end-to-end (issue #95) ───────────────────────────────────
+
+
+@pytest.fixture
+def negbin_family():
+    return NegativeBinomialFamily()
+
+
+@pytest.fixture
+def count_data():
+    """Simulated overdispersed counts with a covariate-driven mean.
+
+    True model: μ(x) = exp(0.5·x + 1), σ = 0.5 — NBI counts whose mean the
+    x1 head must track (parameter-recovery fit, #95 AC5).
+    """
+    g = torch.Generator().manual_seed(95)
+    X = {"x1": torch.randn(N_OBS, IN, generator=g)}
+    mu = torch.exp(0.5 * X["x1"].squeeze(-1) + 1.0)
+    sigma = 0.5
+    torch.manual_seed(955)  # NegativeBinomial.sample takes no generator
+    y = torch.distributions.NegativeBinomial(
+        total_count=1.0 / sigma, logits=torch.log(mu * sigma)
+    ).sample()
+    return X, y
+
+
+class TestNegativeBinomialFamilyEndToEnd:
+    def test_forward_returns_negative_binomial_distribution(
+        self, negbin_family, count_data
+    ):
+        X, _ = count_data
+        formula = {
+            "x1": BayesianMLP(
+                IN, negbin_family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+            ),
+        }
+        model = BayesianNAMLSS(formula=formula, family=negbin_family, n_obs=N_OBS)
+        dist = model(X)
+        assert isinstance(dist, torch.distributions.NegativeBinomial)
+        assert dist.batch_shape == (N_OBS,)
+
+    def test_fit_reduces_nll_on_simulated_counts(self, negbin_family, count_data):
+        """BayesianNAMLSS with NegativeBinomialFamily trains on counts (AC5)."""
+        torch.manual_seed(6)
+        X, y = count_data
+        model = BayesianNAMLSS(
+            formula={
+                "x1": BayesianMLP(
+                    IN, negbin_family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+                )
+            },
+            family=negbin_family,
+            n_obs=N_OBS,
+        )
+        history = model.fit(X, y, epochs=50, lr=1e-2)
+        assert history["nll"][-1] < history["nll"][0] * 1.10
+
+    def test_posterior_predictive_is_mixture(self, negbin_family, count_data):
+        """MixtureSameFamily over NegBin: log_prob, mean and sampling flow
+        through torch's discrete distribution (integer-valued draws)."""
+        torch.manual_seed(7)
+        X, y = count_data
+        formula = {
+            "x1": BayesianMLP(
+                IN, negbin_family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+            ),
+        }
+        model = BayesianNAMLSS(formula=formula, family=negbin_family, n_obs=N_OBS)
+        predictive = model.sample_posterior_predictive(X, T=20)
+        assert isinstance(predictive, torch.distributions.MixtureSameFamily)
+        assert predictive.batch_shape == (N_OBS,)
+        assert torch.isfinite(predictive.log_prob(y)).all()
+        assert torch.isfinite(predictive.mean).all()
+        draws = predictive.sample((10,))
+        assert draws.shape == (10, N_OBS)
+        assert (draws >= 0).all()
+        assert torch.equal(draws, draws.floor())  # integer-valued count draws
