@@ -1,4 +1,4 @@
-"""Fully-variational MLP shape function (ADR-0004, issues #3, #73).
+"""Fully-variational MLP shape function (ADR-0004, ADR-0007, issues #3, #73, #85).
 
 BayesianMLP: every dense layer is a VariationalDense so uncertainty propagates
 through the function shape, not just a final rescaling. Internal per-layer
@@ -44,7 +44,9 @@ class BayesianMLP(nn.Module):
             so it works verbatim as a formula kwarg. None keeps the plain
             fixed-float prior.
         kl_divisor: KL term denominator — set to N (training-set size).
-        flipout: Use the local-reparameterization estimator (ADR-0004).
+        local_reparam: Use the local-reparameterization estimator for
+            training-time forward passes (ADR-0007). Defaults to True — the
+            training default; eval always takes coherent global weight draws.
         activation: Activation between hidden layers.
         validate_args: Passed to VariationalDense constructors. False in the
             training hot path; True in test fixtures (numerical rule 6).
@@ -58,7 +60,7 @@ class BayesianMLP(nn.Module):
         prior_scale: float = 1.0,
         prior: str | dict | None = None,
         kl_divisor: float = 1.0,
-        flipout: bool = False,
+        local_reparam: bool = True,
         activation: str = "relu",
         validate_args: bool = False,
     ) -> None:
@@ -73,7 +75,7 @@ class BayesianMLP(nn.Module):
         # Copy dict specs so a caller mutating theirs can't skew get_config().
         self.prior = dict(prior) if isinstance(prior, dict) else prior
         self.kl_divisor = float(kl_divisor)
-        self.flipout = bool(flipout)
+        self.local_reparam = bool(local_reparam)
         self.activation = activation
         self.validate_args = bool(validate_args)
 
@@ -93,7 +95,7 @@ class BayesianMLP(nn.Module):
             prior_scale=prior_scale,
             prior_scale_handle=self.prior_scale_handle,
             kl_divisor=kl_divisor,
-            flipout=flipout,
+            local_reparam=local_reparam,
             activation=activation,
             validate_args=validate_args,
         )
@@ -112,7 +114,7 @@ class BayesianMLP(nn.Module):
                 prior_scale=prior_scale,
                 prior_scale_handle=self.prior_scale_handle,
                 kl_divisor=kl_divisor,
-                flipout=flipout,
+                local_reparam=local_reparam,
                 activation=None,
                 use_bias=False,
                 validate_args=validate_args,
@@ -145,7 +147,7 @@ class BayesianMLP(nn.Module):
             "prior_scale": self.prior_scale,
             "prior": self.prior,
             "kl_divisor": self.kl_divisor,
-            "flipout": self.flipout,
+            "local_reparam": self.local_reparam,
             "activation": self.activation,
         }
 

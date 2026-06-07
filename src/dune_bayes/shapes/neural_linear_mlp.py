@@ -1,4 +1,4 @@
-"""Last-layer-only Bayesian MLP shape function (ADR-0004, issues #15, #73).
+"""Last-layer-only Bayesian MLP shape fn (ADR-0004, ADR-0007, issues #15, #73, #85).
 
 NeuralLinearMLP: deterministic hidden basis (nn.Linear) with a single variational
 output layer (VariationalDense). Cheaper and more stable than the fully-variational
@@ -47,8 +47,10 @@ class NeuralLinearMLP(nn.Module):
             ``kl_divisor`` is forwarded. Literal-friendly for formula kwargs.
             None keeps the plain fixed-float prior.
         kl_divisor: KL term denominator — set to N (training-set size).
-        flipout: Use the local-reparameterization estimator for the output layer
-            (ADR-0004).
+        local_reparam: Use the local-reparameterization estimator for the
+            output layer's training-time forward passes (ADR-0007). Defaults
+            to True — the training default; eval always takes coherent
+            global weight draws.
         activation: Activation applied between hidden layers. One of
             {None, "linear", "relu", "tanh"}.
         validate_args: Passed to the output VariationalDense constructor. False
@@ -63,7 +65,7 @@ class NeuralLinearMLP(nn.Module):
         prior_scale: float = 1.0,
         prior: str | dict | None = None,
         kl_divisor: float = 1.0,
-        flipout: bool = False,
+        local_reparam: bool = True,
         activation: str = "relu",
         validate_args: bool = False,
     ) -> None:
@@ -78,7 +80,7 @@ class NeuralLinearMLP(nn.Module):
         # Copy dict specs so a caller mutating theirs can't skew get_config().
         self.prior = dict(prior) if isinstance(prior, dict) else prior
         self.kl_divisor = float(kl_divisor)
-        self.flipout = bool(flipout)
+        self.local_reparam = bool(local_reparam)
         # Resolved once here (validates the name); config keeps the string.
         self._act = resolve_activation(activation)
         self.activation = activation
@@ -107,7 +109,7 @@ class NeuralLinearMLP(nn.Module):
             prior_scale=prior_scale,
             prior_scale_handle=self.prior_scale_handle,
             kl_divisor=kl_divisor,
-            flipout=flipout,
+            local_reparam=local_reparam,
             activation=None,
             use_bias=False,
             validate_args=validate_args,
@@ -139,7 +141,7 @@ class NeuralLinearMLP(nn.Module):
             "prior_scale": self.prior_scale,
             "prior": self.prior,
             "kl_divisor": self.kl_divisor,
-            "flipout": self.flipout,
+            "local_reparam": self.local_reparam,
             "activation": self.activation,
         }
 

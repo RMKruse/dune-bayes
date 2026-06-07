@@ -1,8 +1,10 @@
-"""VariationalDense — the variational atom (ADR-0004, issues #2, #73).
+"""VariationalDense — the variational atom (ADR-0004, ADR-0007, issues #2, #73, #85).
 
 Mean-field Normal weight posterior (loc + softplus(rho) scale), closed-form
-Gaussian–Gaussian KL, and an optional local-reparameterization / flipout-style
-estimator for lower gradient variance.  Prior is specified by a serializable
+Gaussian–Gaussian KL, and a local-reparameterization estimator (Kingma et
+al., 2015; correctly named per ADR-0007) for lower gradient variance during
+training — eval always takes the vanilla coherent global weight draw, the
+contract posterior sampling relies on.  Prior is specified by a serializable
 float (never a closure) so get_config/from_config round-trips cleanly — or by
 a PriorScale handle for the ADR-0002 empirical-Bayes / hierarchical tiers.
 
@@ -25,7 +27,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from dune_bayes.layers.base import _RHO_INIT, VariationalLayer, gaussian_kl
-from dune_bayes.utils import resolve_activation
+from dune_bayes.utils import EPS, resolve_activation
 
 if TYPE_CHECKING:
     from dune_bayes.priors.prior_scale import PriorScale
@@ -52,10 +54,11 @@ class VariationalDense(VariationalLayer):
             own hyperprior KL, counted once by collect_kl.
         kl_divisor: KL term denominator — set to N (training-set size) for
             the KL/N weighting prescribed by ADR-0001.
-        flipout: If True use the local-reparameterization estimator: sample
-            pre-activations directly from their marginal Normal instead of
-            sampling the full weight matrix. Same expectation as vanilla,
-            lower gradient variance (see ADR-0004).
+        local_reparam: If True use the local-reparameterization estimator
+            (Kingma et al., 2015): sample pre-activations directly from their
+            marginal Normal instead of sampling the full weight matrix. Same
+            expectation as vanilla, lower gradient variance (ADR-0004,
+            ADR-0007).
         activation: Optional activation name applied after the affine map.
             One of {None, "linear", "relu", "tanh"}.
         use_bias: Whether to include a variational bias vector.
@@ -70,7 +73,7 @@ class VariationalDense(VariationalLayer):
         prior_scale: float = 1.0,
         prior_scale_handle: PriorScale | None = None,
         kl_divisor: float = 1.0,
-        flipout: bool = False,
+        local_reparam: bool = True,
         activation: str | None = None,
         use_bias: bool = True,
         validate_args: bool = False,
@@ -80,7 +83,7 @@ class VariationalDense(VariationalLayer):
         self.units = int(units)
         self.prior_scale = float(prior_scale)
         self.prior_scale_handle = prior_scale_handle
-        self.flipout = bool(flipout)
+        self.local_reparam = bool(local_reparam)
         # Resolved once here (validates the name); config keeps the string.
         self._act = resolve_activation(activation)
         self.activation = activation
@@ -129,7 +132,7 @@ class VariationalDense(VariationalLayer):
         kernel = self.kernel_loc + kernel_scale * torch.randn_like(self.kernel_loc)
         return x @ kernel
 
-    def _forward_flipout(
+    def _forward_local_reparam(
         self,
         x: torch.Tensor,
         kernel_scale: torch.Tensor,
@@ -145,7 +148,11 @@ class VariationalDense(VariationalLayer):
         mean_out = x @ self.kernel_loc
         # (x² @ scale²) gives the per-element variance of the pre-activation.
         var_out = (x**2) @ (kernel_scale**2)
-        std_out = torch.sqrt(var_out)
+        # EPS floor (numerical rule 3): an all-zero input row — routine after
+        # ReLU hidden layers — gives var_out exactly 0, where d√v/dv → ∞ and
+        # the backward pass turns NaN. √(v+EPS) keeps the gradient finite at a
+        # negligible bias (√EPS = 1e-3 std only where the true std is 0).
+        std_out = torch.sqrt(var_out + EPS)
         return mean_out + std_out * torch.randn_like(mean_out)
 
     # ── forward ───────────────────────────────────────────────────────────────
@@ -153,8 +160,14 @@ class VariationalDense(VariationalLayer):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         kernel_scale = F.softplus(self.kernel_rho)
 
-        if self.flipout:
-            out = self._forward_flipout(x, kernel_scale)
+        # ADR-0007: local reparameterization is a TRAINING-only estimator.
+        # eval() ⇒ vanilla coherent global weight draw, always — sample_effects,
+        # draw_predictive, and pointwise_log_lik run under eval_mode, so
+        # posterior sampling can never route through per-row noise (which would
+        # corrupt coherent function draws and the MixtureSameFamily
+        # epistemic/aleatoric decomposition).
+        if self.local_reparam and self.training:
+            out = self._forward_local_reparam(x, kernel_scale)
         else:
             out = self._forward_vanilla(x, kernel_scale)
 
@@ -209,7 +222,7 @@ class VariationalDense(VariationalLayer):
                 else self.prior_scale_handle.get_config()
             ),
             "kl_divisor": self.kl_divisor,
-            "flipout": self.flipout,
+            "local_reparam": self.local_reparam,
             "activation": self.activation,
             "use_bias": self.use_bias,
         }

@@ -342,12 +342,62 @@ def test_sample_dim_slices_are_independent_draws(embedding):
         )
 
 
+def test_eval_mode_draws_are_coherent_across_repeated_levels(embedding):
+    """In eval mode, repeated levels share one embedding draw (ADR-0007).
+
+    A coherent posterior draw is one table realization W ~ q(W) gathered at
+    every index: two rows with the same level must be identical within the
+    draw. (Training keeps per-element local-reparam noise for gradient
+    variance reduction — the embedding analog of VariationalDense's split.)
+    Across separate calls the draws must differ, or the "draw" is just the
+    posterior mean.
+    """
+    embedding.eval()
+    idx = torch.tensor([2, 5, 2, 2, 5])
+    with torch.no_grad():
+        out = embedding(idx)
+        out2 = embedding(idx)
+    assert torch.equal(out[0], out[2]) and torch.equal(out[0], out[3]), (
+        "repeated level 2 maps to different embeddings within one draw"
+    )
+    assert torch.equal(out[1], out[4]), (
+        "repeated level 5 maps to different embeddings within one draw"
+    )
+    # With softplus(_RHO_INIT) ≈ 0.05 posterior scale, two independent draws
+    # coinciding to float32 equality has probability ~0.
+    assert not torch.equal(out, out2), "two eval draws identical — not stochastic"
+
+
+def test_eval_mode_sample_dim_slices_are_coherent_independent_draws(embedding):
+    """Eval + (S, batch) idx: one table draw per slice, fresh across slices.
+
+    The sample-dimension contract (issue 0027) under the ADR-0007 split:
+    each slice s is ONE coherent table realization (repeated levels equal
+    within the slice) and slices carry independent draws (not one draw
+    broadcast S ways).
+    """
+    embedding.eval()
+    S = 4
+    idx = torch.tensor([2, 5, 2, 2, 5]).expand(S, 5)
+    with torch.no_grad():
+        out = embedding(idx)  # (S, 5, EMBEDDING_DIM)
+    assert out.shape == (S, 5, EMBEDDING_DIM)
+    for s in range(S):
+        assert torch.equal(out[s, 0], out[s, 2]), (
+            f"slice {s}: repeated level differs within one draw"
+        )
+    for s in range(1, S):
+        assert not torch.equal(out[0], out[s]), (
+            f"slice {s} equals slice 0 — one table draw broadcast across samples"
+        )
+
+
 def test_sample_dim_marginal_matches_posterior():
     """Per-element draws follow N(loc[idx], softplus(rho)[idx]²) — MC convergence.
 
-    Local reparameterization (per-element fresh noise, the flipout analog)
-    must leave each element's marginal posterior exact; ELBO, WAIC pointwise
-    terms, and ribbon quantiles consume only these marginals.
+    Local reparameterization (per-element fresh noise, training path per
+    ADR-0007) must leave each element's marginal posterior exact; ELBO, WAIC
+    pointwise terms, and ribbon quantiles consume only these marginals.
     Tolerances (MC noise): S=4000 draws; mean std_err ≈ 0.049/√4000 ≈ 8e-4,
     abs=0.01 gives ~12× headroom.  Sample-std rel error ≈ 1/√(2S) ≈ 1.1%;
     rel=0.15 is stable under the fixed seed and catches a shared-draw bug
