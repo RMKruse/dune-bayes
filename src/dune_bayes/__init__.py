@@ -25,7 +25,14 @@ from dune_bayes.families import (
     NormalFamily,
     StudentTFamily,
 )
-from dune_bayes.metrics import VarianceDecomposition, crps, variance_decomposition
+from dune_bayes.metrics import (
+    QuantileCoverage,
+    VarianceDecomposition,
+    crps,
+    pit,
+    quantile_coverage,
+    variance_decomposition,
+)
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.plotting import (
     plot_dist,
@@ -47,6 +54,7 @@ __all__ = [
     "GammaFamily",
     "NormalFamily",
     "PriorScale",
+    "QuantileCoverage",
     "StudentTFamily",
     "VarianceDecomposition",
     "__version__",
@@ -54,10 +62,12 @@ __all__ = [
     "crps",
     "elbo",
     "loo",
+    "pit",
     "plot_dist",
     "plot_effect_ribbon",
     "plot_interaction_surface",
     "predictive_quantiles",
+    "quantile_coverage",
     "ribbon_quantiles",
     "seed_everything",
     "surface_stats",
