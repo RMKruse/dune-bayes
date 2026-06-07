@@ -21,6 +21,7 @@ from dune_bayes.compare import (
 from dune_bayes.data import DataModule
 from dune_bayes.families import (
     BaseFamily,
+    BetaFamily,
     GammaFamily,
     JohnsonSU,
     JohnsonSUFamily,
@@ -53,6 +54,7 @@ __version__ = "0.1.0.dev0"
 __all__ = [
     "BaseFamily",
     "BayesianNAMLSS",
+    "BetaFamily",
     "DataModule",
     "GammaFamily",
     "JohnsonSU",
