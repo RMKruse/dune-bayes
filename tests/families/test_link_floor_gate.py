@@ -19,6 +19,7 @@ import torch
 
 from dune_bayes.families import (
     BaseFamily,
+    BetaFamily,
     GammaFamily,
     NegativeBinomialFamily,
     NormalFamily,
@@ -34,7 +35,9 @@ PRE_LINK_VALUES = [-1e4, -104.0, -3.0, 0.0, 3.0, 1e4]
 # Candidate responses spanning typical values and both tails; each family
 # keeps only the ones inside its support (via the distribution's own
 # ``support.check``), so future families need no hand-edit here.
-CANDIDATE_RESPONSES = [-50.0, -1.0, 1e-4, 0.01, 1.0, 50.0, 1e6]
+# 0.5 / 0.99 exist for the bounded (0, 1) family (Beta, #96), probing the
+# mid-support and the (β−1)·log(1−y) side near 1.
+CANDIDATE_RESPONSES = [-50.0, -1.0, 1e-4, 0.01, 0.5, 0.99, 1.0, 50.0, 1e6]
 
 
 def test_subclass_walk_finds_all_registered_families() -> None:
@@ -45,6 +48,7 @@ def test_subclass_walk_finds_all_registered_families() -> None:
         GammaFamily,
         StudentTFamily,
         NegativeBinomialFamily,
+        BetaFamily,
     } <= found
 
 

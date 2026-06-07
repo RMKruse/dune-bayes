@@ -13,7 +13,12 @@ conventions), which is exactly where a scipy-mapping bug would live.
 
 import torch
 
-from dune_bayes.families import GammaFamily, NegativeBinomialFamily, StudentTFamily
+from dune_bayes.families import (
+    BetaFamily,
+    GammaFamily,
+    NegativeBinomialFamily,
+    StudentTFamily,
+)
 
 # MC tolerance: the empirical CDF at y is a binomial proportion with
 # SE = sqrt(p(1-p)/N) ≤ 0.5/sqrt(N); at N = 200_000 that is ≤ 0.0011, so
@@ -78,6 +83,31 @@ def test_negative_binomial_cdf_matches_torch_sampler():
         ]
     )
     y = torch.tensor([2.0, 0.0, 3.0])
+
+    result = family.cdf(params, y)
+
+    expected = _mc_cdf_reference(family(params), y)
+    assert result.dtype == torch.float64
+    torch.testing.assert_close(result, expected, rtol=0.0, atol=_ATOL_MC)
+
+
+def test_beta_cdf_matches_torch_sampler():
+    """Beta cdf agrees with the empirical CDF of torch's own draws.
+
+    The mapping hotspot (issue #96): a swapped μ ↔ (1−μ) (i.e. scipy a ↔ b)
+    passes any μ = 0.5 fixture, so the linked means here sit well away from
+    1/2 on both sides (μ ≈ 0.12, 0.73) with a symmetric control in between.
+    """
+    family = BetaFamily(validate_args=True)
+    # Raw params: mean sigmoid-linked, precision softplus-linked.
+    params = torch.tensor(
+        [
+            [-2.0, 1.0],  # ≈ Beta(a 0.16, b 1.15) — μ ≈ 0.12, diffuse
+            [1.0, 3.0],  # ≈ Beta(a 2.23, b 0.82) — μ ≈ 0.73
+            [0.0, 5.0],  # ≈ Beta(a 2.51, b 2.51) — symmetric control
+        ]
+    )
+    y = torch.tensor([0.1, 0.6, 0.5])
 
     result = family.cdf(params, y)
 

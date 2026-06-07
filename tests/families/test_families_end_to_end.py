@@ -17,6 +17,7 @@ import torch
 
 from dune_bayes.compare import loo, waic
 from dune_bayes.families import (
+    BetaFamily,
     GammaFamily,
     JohnsonSUFamily,
     NegativeBinomialFamily,
@@ -322,3 +323,82 @@ class TestNegativeBinomialFamilyEndToEnd:
         assert draws.shape == (10, N_OBS)
         assert (draws >= 0).all()
         assert torch.equal(draws, draws.floor())  # integer-valued count draws
+
+
+# ── Beta end-to-end (issue #96) ───────────────────────────────────────────────
+
+
+@pytest.fixture
+def beta_family():
+    return BetaFamily()
+
+
+@pytest.fixture
+def proportion_data():
+    """Simulated (0, 1) proportions with a covariate-driven mean.
+
+    True model: μ(x) = sigmoid(1.5·x), φ = 10 — bounded responses whose mean
+    the x1 head must track (issue #96, bounded-response benchmark panel).
+    """
+    g = torch.Generator().manual_seed(96)
+    X = {"x1": torch.randn(N_OBS, IN, generator=g)}
+    mu = torch.sigmoid(1.5 * X["x1"].squeeze(-1))
+    phi = 10.0
+    torch.manual_seed(965)  # Beta.sample takes no generator
+    y = torch.distributions.Beta(
+        concentration1=mu * phi, concentration0=(1.0 - mu) * phi
+    ).sample()
+    return X, y
+
+
+class TestBetaFamilyEndToEnd:
+    def test_forward_returns_beta_distribution(self, beta_family, proportion_data):
+        X, _ = proportion_data
+        formula = {
+            "x1": BayesianMLP(
+                IN, beta_family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+            ),
+        }
+        model = BayesianNAMLSS(formula=formula, family=beta_family, n_obs=N_OBS)
+        dist = model(X)
+        assert isinstance(dist, torch.distributions.Beta)
+        assert dist.batch_shape == (N_OBS,)
+
+    def test_fit_reduces_nll_on_simulated_proportions(
+        self, beta_family, proportion_data
+    ):
+        """BayesianNAMLSS with BetaFamily trains on (0, 1) responses."""
+        torch.manual_seed(8)
+        X, y = proportion_data
+        model = BayesianNAMLSS(
+            formula={
+                "x1": BayesianMLP(
+                    IN, beta_family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+                )
+            },
+            family=beta_family,
+            n_obs=N_OBS,
+        )
+        history = model.fit(X, y, epochs=50, lr=1e-2)
+        assert history["nll"][-1] < history["nll"][0] * 1.10
+
+    def test_posterior_predictive_is_mixture(self, beta_family, proportion_data):
+        """MixtureSameFamily over Beta: log_prob, mean and sampling flow
+        through the open-support subclass — exactly where a broken ``expand``
+        (it must preserve ``_OpenSupportBeta``) would surface."""
+        torch.manual_seed(9)
+        X, y = proportion_data
+        formula = {
+            "x1": BayesianMLP(
+                IN, beta_family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+            ),
+        }
+        model = BayesianNAMLSS(formula=formula, family=beta_family, n_obs=N_OBS)
+        predictive = model.sample_posterior_predictive(X, T=20)
+        assert isinstance(predictive, torch.distributions.MixtureSameFamily)
+        assert predictive.batch_shape == (N_OBS,)
+        assert torch.isfinite(predictive.log_prob(y)).all()
+        assert torch.isfinite(predictive.mean).all()
+        draws = predictive.sample((10,))
+        assert draws.shape == (10, N_OBS)
+        assert ((draws > 0) & (draws < 1)).all()  # draws stay inside (0, 1)
