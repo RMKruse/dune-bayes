@@ -25,7 +25,7 @@ from dune_bayes.families import (
     NormalFamily,
     StudentTFamily,
 )
-from dune_bayes.metrics import VarianceDecomposition, variance_decomposition
+from dune_bayes.metrics import VarianceDecomposition, crps, variance_decomposition
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.plotting import (
     plot_dist,
@@ -51,6 +51,7 @@ __all__ = [
     "VarianceDecomposition",
     "__version__",
     "compare",
+    "crps",
     "elbo",
     "loo",
     "plot_dist",
