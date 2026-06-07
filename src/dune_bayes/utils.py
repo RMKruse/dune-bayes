@@ -1,9 +1,11 @@
 """Cross-cutting helpers: EPS constant, activation registry, eval_mode,
-tensor coercion, and seed_everything (CLAUDE.md, GitHub #62).
+tensor coercion, and seed_everything (CLAUDE.md, GitHub #62, #90).
 
-Reproducibility holds only within one model object, never across two
-freshly-built ones (CLAUDE.md seeding rule) — seed_everything makes a single
-seed → build → sample sequence deterministic, nothing more.
+The re-seed protocol (seed_everything → build → fit) is exactly reproducible
+on CPU (verified in tests/model/test_reseed_determinism.py, GitHub #90). The
+remaining caveat: two models built back-to-back within one RNG stream — no
+re-seed between them — do not draw identical noise, because each build
+advances the global stream.
 """
 
 import random
@@ -82,12 +84,21 @@ def to_numpy(x: torch.Tensor | np.ndarray) -> np.ndarray:
     return np.asarray(x)
 
 
-def seed_everything(seed: int) -> None:
+def seed_everything(seed: int, deterministic: bool = False) -> None:
     """Seed the global torch, numpy, and Python ``random`` generators.
+
+    The flag always sets torch's deterministic-algorithms mode (on or off) so
+    the global state after a call is fully explicit, never inherited.
 
     Args:
         seed: Integer seed applied to every global generator.
+        deterministic: When True, additionally enable
+            ``torch.use_deterministic_algorithms`` — bit-exact run-to-run
+            reproducibility at the cost of speed (and errors on ops with no
+            deterministic kernel). Default False keeps the fast kernels;
+            seeding alone already suffices on CPU (GitHub #90).
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
+    torch.use_deterministic_algorithms(deterministic)

@@ -244,8 +244,10 @@ class DataModule:
                 be smaller than ``batch_size`` (``drop_last=False``).
             shuffle: Whether to shuffle observations each epoch (default True).
             generator: Optional seeded ``torch.Generator`` for reproducible
-                shuffling within one model object (consistent with the
-                one-model-object reproducibility rule in CLAUDE.md).
+                shuffling independent of the global RNG stream.  Without it
+                the shuffle draws from the global stream, which is still
+                reproducible under the re-seed protocol (CLAUDE.md seeding
+                rule, GitHub #90).
 
         Returns:
             A ``torch.utils.data.DataLoader`` whose items are
