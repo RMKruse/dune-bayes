@@ -7,7 +7,11 @@ Every response family must expose:
     base — it is always ``self(params).log_prob(y)``; families implement only
     ``__call__``).
 
-Positivity transforms must route through softplus (numerical rule 1).
+Positivity links must be ``softplus(x) + EPS`` (numerical rule 1; GitHub #88):
+bare softplus underflows to exactly 0.0 near pre-link −104 in float32, which
+poisons ``log_prob``. Consequence: the minimum representable scale (or rate /
+concentration) is EPS. ``transform_to(constraints.positive)`` is explicitly
+rejected — it is ExpTransform, which overflows.
 validate_args follows the test-vs-hot-path convention (numerical rule 6).
 """
 
@@ -23,6 +27,11 @@ class BaseFamily(ABC):
 
     Subclasses must set ``param_count: int`` as a class attribute and implement
     ``__call__``; ``log_prob`` is inherited.
+
+    Every positive distribution parameter is linked as ``softplus(x) + EPS``
+    (numerical rule 1), so the smallest scale a family can represent is EPS —
+    the price of a finite ``log_prob`` at arbitrarily negative pre-link values
+    (the ±1e4 gate test in ``tests/families/test_link_floor_gate.py``).
     """
 
     param_count: int
