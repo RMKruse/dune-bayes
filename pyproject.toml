@@ -12,6 +12,9 @@ dependencies = [
     "numpy",
     "pandas>=2.2",
     "arviz",
+    # Explicit, not transitive (issue #93): family CDFs for PIT calibration
+    # go through scipy.stats (torch's StudentT has no .cdf).
+    "scipy>=1.14",
     "scikit-learn",
     "matplotlib",
 ]
@@ -22,6 +25,7 @@ dev = [
     "ruff",
     "mypy",
     "pandas-stubs",
+    "scipy-stubs",
 ]
 
 [tool.hatch.build.targets.wheel]
