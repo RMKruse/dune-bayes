@@ -1,0 +1,43 @@
+# CI gates (CLAUDE.md tooling rules): ruff format + lint, mypy (gating since
+# disallow_untyped_defs went green for src/dune_bayes), and the full pytest
+# suite — correctness tests run unconditionally, never skipped.
+
+name: CI
+
+# DEACTIVATED until the repo goes public (Actions minutes) — manual trigger
+# only. To activate: replace workflow_dispatch with the push/pull_request
+# triggers below.
+on:
+  workflow_dispatch:
+# on:
+#   push:
+#     branches: [main, dev]
+#   pull_request:
+#     branches: [main, dev]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --extra dev
+
+      - name: ruff format
+        run: uv run ruff format --check src tests
+
+      - name: ruff lint
+        run: uv run ruff check src tests
+
+      - name: mypy
+        run: uv run mypy src/dune_bayes
+
+      - name: pytest
+        run: uv run pytest -q
