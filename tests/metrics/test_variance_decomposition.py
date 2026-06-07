@@ -19,6 +19,7 @@ import pytest
 import torch
 
 from dune_bayes.families import (
+    BetaFamily,
     GammaFamily,
     NegativeBinomialFamily,
     NormalFamily,
@@ -105,6 +106,9 @@ def test_decomposition_shapes_and_law_of_total_variance(model, data_x):
         # integer-valued counts — mean/variance are continuous functions of
         # (μ, σ) even though y is discrete.
         NegativeBinomialFamily(validate_args=True),
+        # Bounded support (issue #96): per-draw means live in (0, 1), so the
+        # epistemic spread is small but the LOTV identity holds unchanged.
+        BetaFamily(validate_args=True),
     ],
     ids=lambda f: type(f).__name__,
 )
