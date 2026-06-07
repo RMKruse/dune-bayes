@@ -84,9 +84,46 @@ features become Bayesian embeddings — the neural analog of a random effect,
 with partial pooling of rare levels. Families shipped so far:
 `NormalFamily`, `StudentTFamily`, `GammaFamily`.
 
+## Architecture
+
+How a fitted `y ~ Normal(μ, σ)` model is assembled — one Bayesian shape
+function per feature, each contributing additively to **both** distributional
+parameters:
+
+```mermaid
+flowchart TB
+    x1["x₁"] --> f1["BayesianMLP f₁<br/>w ~ q(w) = N(μ_w, softplus(ρ_w)²)"]
+    x2["x₂"] --> f2["BayesianMLP f₂"]
+    xJ["x_J"] --> fJ["BayesianMLP f_J"]
+    b0["BayesianIntercept β₀ ∈ ℝ²<br/>q(β₀) = N(m, softplus(ρ)²)"]
+
+    f1 -->|"f₁(x₁) · (batch, 2)"| sum
+    f2 -->|"f₂(x₂)"| sum
+    fJ -->|"f_J(x_J)"| sum
+    b0 --> sum
+    sum["params = Σⱼ fⱼ(xⱼ) + β₀ · (batch, 2)"]
+
+    sum -->|"column 0 · identity link"| mu["μ (loc)"]
+    sum -->|"column 1 · softplus(·) + EPS"| sigma["σ > 0 (scale)"]
+    mu --> dist["Normal(μ, σ)"]
+    sigma --> dist
+
+    dist -->|"loss = −mean log-lik + Σ KL/N"| train["training (negative ELBO)"]
+    dist -->|"T posterior draws"| ppd["MixtureSameFamily<br/>posterior predictive"]
+```
+
+Every dense layer is a `VariationalDense` (mean-field Gaussian posterior over
+weights), so σ is feature-dependent — heteroscedastic by construction — and
+every effect carries an epistemic credible band. Other families work the same
+way: the family's `param_count` sets the output width (`StudentTFamily` → 3
+columns, `GammaFamily` → 2). The full walkthrough lives in
+[`docs/architecture.md`](docs/architecture.md).
+
 ## Documentation
 
 - [`CONTEXT.md`](CONTEXT.md) — the statistical contract and glossary (start here).
+- [`docs/architecture.md`](docs/architecture.md) — the model graph: feature
+  nets → additive sum → family links → ELBO / posterior predictive.
 - [`docs/adr/`](docs/adr/) — the six design decisions (inference engine,
   priors-as-smoothness, predictive/comparison architecture, the
   `VariationalDense` atom, categoricals & interactions, PyTorch backend).
