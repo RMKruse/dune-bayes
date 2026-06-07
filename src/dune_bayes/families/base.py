@@ -57,6 +57,30 @@ class BaseFamily(ABC):
             A torch.distributions.Distribution with batch_shape (batch,).
         """
 
+    def cdf(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """Predictive CDF F(y | params), evaluated via scipy (issue 0093).
+
+        Eval-time only — implementations go through scipy on numpy arrays
+        (torch's StudentT has no ``.cdf``), so there is NO gradient path.
+        Returns float64 (calibration metrics accumulate in float64, dtype
+        rule). Families without a scipy mapping inherit this raiser, which
+        makes PIT-based calibration unavailable rather than silently wrong.
+
+        Args:
+            params: Raw network output, shape (..., param_count).
+            y: Observed responses, broadcastable to the batch shape (...).
+
+        Returns:
+            Tensor of shape (...) with F(y | linked params), dtype float64.
+
+        Raises:
+            NotImplementedError: If the family defines no CDF mapping.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} defines no cdf; PIT-based calibration "
+            "metrics are unavailable for this family."
+        )
+
     def log_prob(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Pointwise log-likelihood.
 
