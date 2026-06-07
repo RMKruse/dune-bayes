@@ -29,12 +29,14 @@ Design:
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
 import torch
 import torch.nn as nn
 
+from dune_bayes.families import BaseFamily
 from dune_bayes.layers import (
     BayesianIntercept,
     VariationalLayer,
@@ -78,7 +80,7 @@ class BayesianNAMLSS(nn.Module):
     def __init__(
         self,
         formula: dict[str, nn.Module],
-        family: Any,
+        family: BaseFamily,
         n_obs: int | None = None,
         feature_dropout: float | None = None,
         intercept_mode: str = "variational",
@@ -113,7 +115,7 @@ class BayesianNAMLSS(nn.Module):
     def from_formula(
         cls,
         formula: str,
-        family: Any,
+        family: BaseFamily,
         n_obs: int | None = None,
         feature_dropout: float | None = None,
         intercept_mode: str = "variational",
@@ -299,8 +301,10 @@ class BayesianNAMLSS(nn.Module):
             batch_size: Minibatch size. None (default) keeps full-batch training.
                 Requires X to be a DataModule.
             seed: Integer seed for the DataLoader shuffle generator. Only used
-                when ``batch_size`` is set; controls batch ordering within
-                one model object (consistent with the reproducibility rule).
+                when ``batch_size`` is set; pins batch ordering independent of
+                the global RNG stream. None leaves the shuffle on the global
+                stream — still reproducible under the re-seed protocol
+                (CLAUDE.md seeding rule, GitHub #90).
             callbacks: Optional list of callables with signature (epoch: int) → None,
                 called at the start of each epoch alongside the warm-up callback.
 
@@ -334,24 +338,22 @@ class BayesianNAMLSS(nn.Module):
         if callbacks:
             _callbacks.extend(callbacks)
 
-        # Full-batch training is minibatching with a single batch (issue 0026):
-        # one loop, one history-append; the mean over one batch is the value.
-        use_minibatch = batch_size is not None and data_module is not None
-
         self.train()
         for epoch in range(epochs):
             for cb in _callbacks:
                 cb(epoch)
 
-            if use_minibatch:
+            # Full-batch training is minibatching with a single batch
+            # (issue 0026): one loop, one history-append; the mean over one
+            # batch is the value.
+            batches: Iterable[tuple[dict[str, torch.Tensor], torch.Tensor]]
+            if batch_size is not None and data_module is not None:
                 # Seed a fresh generator each epoch so the shuffle sequence is
                 # reproducible within one model object when seed is given.
                 gen: torch.Generator | None = None
                 if seed is not None:
                     gen = torch.Generator().manual_seed(seed + epoch)
-                batches = data_module.dataloader(  # type: ignore[union-attr]
-                    batch_size=batch_size, generator=gen
-                )
+                batches = data_module.dataloader(batch_size=batch_size, generator=gen)
             else:
                 batches = [(X, y)]
 
@@ -442,7 +444,7 @@ class BayesianNAMLSS(nn.Module):
         cls,
         path: str | Path,
         formula: dict[str, nn.Module],
-        family: Any,
+        family: BaseFamily,
     ) -> BayesianNAMLSS:
         """Load a BayesianNAMLSS from a checkpoint written by save().
 

@@ -35,6 +35,12 @@ def x():
     return torch.randn(BATCH, IN, generator=torch.Generator().manual_seed(42))
 
 
+def test_local_reparam_default_on(model):
+    """Bayesian shape functions default to local_reparam=True (ADR-0007)."""
+    assert model.local_reparam is True
+    assert model.get_config()["local_reparam"] is True
+
+
 # ── 1. shape ──────────────────────────────────────────────────────────────────
 
 

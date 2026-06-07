@@ -75,7 +75,9 @@ class DeterministicMLP(nn.Module):
             x = layer(x)
             if self._act is not None:
                 x = self._act(x)
-        return self.layers[-1](x)
+        # nn.Module.__call__ is untyped in torch's stubs; anchor the return type.
+        out: torch.Tensor = self.layers[-1](x)
+        return out
 
     # ── serialization ─────────────────────────────────────────────────────────
 

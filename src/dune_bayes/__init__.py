@@ -21,9 +21,21 @@ from dune_bayes.compare import (
 from dune_bayes.data import DataModule
 from dune_bayes.families import (
     BaseFamily,
+    BetaFamily,
     GammaFamily,
+    JohnsonSU,
+    JohnsonSUFamily,
+    NegativeBinomialFamily,
     NormalFamily,
     StudentTFamily,
+)
+from dune_bayes.metrics import (
+    QuantileCoverage,
+    VarianceDecomposition,
+    crps,
+    pit,
+    quantile_coverage,
+    variance_decomposition,
 )
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.plotting import (
@@ -42,22 +54,32 @@ __version__ = "0.1.0.dev0"
 __all__ = [
     "BaseFamily",
     "BayesianNAMLSS",
+    "BetaFamily",
     "DataModule",
     "GammaFamily",
+    "JohnsonSU",
+    "JohnsonSUFamily",
+    "NegativeBinomialFamily",
     "NormalFamily",
     "PriorScale",
+    "QuantileCoverage",
     "StudentTFamily",
+    "VarianceDecomposition",
     "__version__",
     "compare",
+    "crps",
     "elbo",
     "loo",
+    "pit",
     "plot_dist",
     "plot_effect_ribbon",
     "plot_interaction_surface",
     "predictive_quantiles",
+    "quantile_coverage",
     "ribbon_quantiles",
     "seed_everything",
     "surface_stats",
     "to_inference_data",
+    "variance_decomposition",
     "waic",
 ]

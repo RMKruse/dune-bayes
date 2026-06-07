@@ -12,6 +12,9 @@ dependencies = [
     "numpy",
     "pandas>=2.2",
     "arviz",
+    # Explicit, not transitive (issue #93): family CDFs for PIT calibration
+    # go through scipy.stats (torch's StudentT has no .cdf).
+    "scipy>=1.14",
     "scikit-learn",
     "matplotlib",
 ]
@@ -22,6 +25,7 @@ dev = [
     "ruff",
     "mypy",
     "pandas-stubs",
+    "scipy-stubs",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -40,3 +44,13 @@ testpaths = ["tests"]
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
+
+# Type hints on all public signatures, mechanized (CLAUDE.md tooling rule).
+[[tool.mypy.overrides]]
+module = "dune_bayes.*"
+disallow_untyped_defs = true
+
+# arviz ships no py.typed marker; its returns are handled at our call sites.
+[[tool.mypy.overrides]]
+module = "arviz.*"
+ignore_missing_imports = true

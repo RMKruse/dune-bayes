@@ -20,6 +20,14 @@ aggregation across the nested NAMLSS graph via an explicit module-walk, and a
 `state_dict` + config save/load round-trip with `max|Δw| = 0`. See the ported
 `spikes/` and the PyTorch note in the Verification section.
 
+**Amended by ADR-0007 (2026-06-07): estimator renamed.** The *Estimator* bullet
+below calls the variance-reduction draw "local-reparameterization /
+flipout-style". The implementation is **local reparameterization** (Kingma et
+al., 2015), not flipout (Wen et al., 2018); the flag is now named
+`local_reparam`, defaults to **on for training**, and is **training-gated** —
+posterior sampling always takes vanilla coherent global weight draws. See
+ADR-0007 (issue #85).
+
 ## Context
 
 Every Bayesian shape function (`BayesianMLP`, `NeuralLinearMLP`) is built from a

@@ -7,7 +7,11 @@ Every response family must expose:
     base — it is always ``self(params).log_prob(y)``; families implement only
     ``__call__``).
 
-Positivity transforms must route through softplus (numerical rule 1).
+Positivity links must be ``softplus(x) + EPS`` (numerical rule 1; GitHub #88):
+bare softplus underflows to exactly 0.0 near pre-link −104 in float32, which
+poisons ``log_prob``. Consequence: the minimum representable scale (or rate /
+concentration) is EPS. ``transform_to(constraints.positive)`` is explicitly
+rejected — it is ExpTransform, which overflows.
 validate_args follows the test-vs-hot-path convention (numerical rule 6).
 """
 
@@ -23,6 +27,11 @@ class BaseFamily(ABC):
 
     Subclasses must set ``param_count: int`` as a class attribute and implement
     ``__call__``; ``log_prob`` is inherited.
+
+    Every positive distribution parameter is linked as ``softplus(x) + EPS``
+    (numerical rule 1), so the smallest scale a family can represent is EPS —
+    the price of a finite ``log_prob`` at arbitrarily negative pre-link values
+    (the ±1e4 gate test in ``tests/families/test_link_floor_gate.py``).
     """
 
     param_count: int
@@ -47,6 +56,30 @@ class BaseFamily(ABC):
         Returns:
             A torch.distributions.Distribution with batch_shape (batch,).
         """
+
+    def cdf(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """Predictive CDF F(y | params), evaluated via scipy (issue 0093).
+
+        Eval-time only — implementations go through scipy on numpy arrays
+        (torch's StudentT has no ``.cdf``), so there is NO gradient path.
+        Returns float64 (calibration metrics accumulate in float64, dtype
+        rule). Families without a scipy mapping inherit this raiser, which
+        makes PIT-based calibration unavailable rather than silently wrong.
+
+        Args:
+            params: Raw network output, shape (..., param_count).
+            y: Observed responses, broadcastable to the batch shape (...).
+
+        Returns:
+            Tensor of shape (...) with F(y | linked params), dtype float64.
+
+        Raises:
+            NotImplementedError: If the family defines no CDF mapping.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} defines no cdf; PIT-based calibration "
+            "metrics are unavailable for this family."
+        )
 
     def log_prob(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         """Pointwise log-likelihood.

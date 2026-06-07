@@ -195,6 +195,30 @@ def test_fit_reduces_nll(family):
     )
 
 
+def test_elbo_trains_green_with_local_reparam_default(family):
+    """The ELBO trains with local reparameterization on by default (ADR-0007).
+
+    A default-built BayesianMLP must carry local_reparam=True, and fit() —
+    which runs in train mode, the only place the estimator is active — must
+    still reduce NLL. Same toy regression and tolerance as
+    test_fit_reduces_nll (rel=0.10 for MC noise).
+    """
+    torch.manual_seed(0)
+    g = torch.Generator().manual_seed(0)
+    X = {"x1": torch.randn(N_OBS, IN, generator=g)}
+    y = 2.0 * X["x1"].squeeze(-1) + 0.1 * torch.randn(N_OBS, generator=g)
+
+    net = BayesianMLP(IN, family.param_count, hidden_dims=[8], kl_divisor=N_OBS)
+    assert net.local_reparam is True, "training default must be ON (ADR-0007)"
+
+    model = BayesianNAMLSS(formula={"x1": net}, family=family, n_obs=N_OBS)
+    history = model.fit(X, y, epochs=50, lr=1e-2)
+
+    assert history["nll"][-1] < history["nll"][0] * 1.10, (
+        "NLL did not decrease with local_reparam on"
+    )
+
+
 # ── 6. partial-Bayesian formula — AC4 ────────────────────────────────────────
 
 

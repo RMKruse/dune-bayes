@@ -20,6 +20,10 @@ Design:
     float32 (numerical rule, CLAUDE.md dtype section).
   - MixtureSameFamily encodes the epistemic/aleatoric split: variance across
     components = epistemic uncertainty; within each component = family aleatoric.
+    The split is valid only for coherent draws (ADR-0007, issue #85): each of
+    the T components must be ONE global weight realization — eval_mode forces
+    every variational layer onto the vanilla path, so the training-only
+    local-reparameterization estimator can never corrupt the decomposition.
   - T_eval = 1000 is the default for information-criterion runs; T_predict = 200
     for predictive plots (CONTEXT.md "MC sample counts").
 """

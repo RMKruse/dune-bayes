@@ -4,7 +4,7 @@ Four reference-test archetypes (CLAUDE.md):
   - Closed-form: KL against hand-computed Gaussian–Gaussian reference.
   - Round-trip:  state_dict + from_config with max|Δw| == 0.
   - Shape:       forward output (batch, units).
-  - MC-convergence: flipout/vanilla mean agreement over T draws.
+  - MC-convergence: local-reparam/vanilla mean agreement over T draws.
 """
 
 import math
@@ -177,7 +177,7 @@ def test_get_config_is_closure_free(layer):
 def test_from_config_preserves_hyperparameters():
     """from_config(get_config()) reconstructs an equivalent layer."""
     original = VariationalDense(
-        5, 4, prior_scale=0.33, kl_divisor=99.0, activation="relu", flipout=True
+        5, 4, prior_scale=0.33, kl_divisor=99.0, activation="relu", local_reparam=True
     )
     cfg = original.get_config()
     rebuilt = VariationalDense.from_config(cfg)
@@ -187,8 +187,52 @@ def test_from_config_preserves_hyperparameters():
     assert rebuilt.prior_scale == pytest.approx(original.prior_scale)
     assert rebuilt.kl_divisor == pytest.approx(original.kl_divisor)
     assert rebuilt.activation == original.activation
-    assert rebuilt.flipout == original.flipout
+    assert rebuilt.local_reparam == original.local_reparam
     assert rebuilt.use_bias == original.use_bias
+
+
+def test_local_reparam_default_on():
+    """local_reparam defaults to True — the training default (ADR-0007).
+
+    The estimator is training-gated, so the default costs nothing at
+    sampling time; training gets the variance reduction for free.
+    """
+    assert VariationalDense(IN, UNITS).local_reparam is True
+
+
+def test_local_reparam_zero_row_gradients_are_finite():
+    """An all-zero input row must not poison gradients (numerical rule 3).
+
+    Under local reparameterization the pre-activation variance is
+    x² @ scale², which is exactly 0 for a zero row — and d√v/dv → ∞ as v → 0.
+    ReLU hidden layers routinely emit all-zero rows, so with local_reparam on
+    by default this is a hot-path case, not a corner: gradients through a
+    zero row must stay finite.
+    """
+    torch.manual_seed(9)
+    layer = VariationalDense(IN, UNITS, local_reparam=True, validate_args=True)
+    layer.train()
+    x = torch.randn(BATCH, IN)
+    x[0] = 0.0  # the ReLU-dead-row case
+    out = layer(x)
+    out.sum().backward()
+    for name, p in layer.named_parameters():
+        assert torch.isfinite(p.grad).all(), f"non-finite gradient in {name}"
+
+
+def test_local_reparam_flag_round_trips():
+    """The estimator flag is named local_reparam (ADR-0007 rename) and round-trips.
+
+    The implementation is Kingma-style local reparameterization, not flipout;
+    the old name was a methods-section error. No "flipout" key may survive in
+    the serialized config.
+    """
+    layer = VariationalDense(IN, UNITS, local_reparam=True)
+    cfg = layer.get_config()
+    assert cfg["local_reparam"] is True
+    assert "flipout" not in cfg
+    rebuilt = VariationalDense.from_config(cfg)
+    assert rebuilt.local_reparam is True
 
 
 # ── 7. state_dict round-trip (ADR-0004 load-bearing claim B) ─────────────────
@@ -222,11 +266,11 @@ def test_state_dict_round_trip_max_delta_zero(tmp_path):
     )
 
 
-# ── 8. flipout / vanilla MC convergence ───────────────────────────────────────
+# ── 8. local-reparam / vanilla MC convergence ─────────────────────────────────
 
 
-def test_flipout_vanilla_agree_in_expectation():
-    """Flipout and vanilla estimators produce the same expected output.
+def test_local_reparam_vanilla_agree_in_expectation():
+    """Local-reparam and vanilla estimators produce the same expected output.
 
     Verified by MC convergence (T draws) under a fixed seed.  We compare means,
     not individual samples — reparameterization noise differs between the two
@@ -237,31 +281,34 @@ def test_flipout_vanilla_agree_in_expectation():
     x = torch.randn(16, IN)
 
     # Build two layers with identical parameters using the same seed.
-    # Note: reproducibility holds within one model object under a global seed;
-    # across two freshly-built objects it does not, so we copy weights explicitly.
+    # Note: two builds within one RNG stream (no re-seed between them) draw
+    # different init noise (CLAUDE.md seeding rule, GitHub #90), so we copy
+    # weights explicitly rather than rely on build-order luck.
     vanilla = VariationalDense(
-        IN, UNITS, prior_scale=1.0, kl_divisor=1.0, flipout=False
+        IN, UNITS, prior_scale=1.0, kl_divisor=1.0, local_reparam=False
     )
-    flipout = VariationalDense.from_config({**vanilla.get_config(), "flipout": True})
-    flipout.load_state_dict(vanilla.state_dict())
+    local = VariationalDense.from_config(
+        {**vanilla.get_config(), "local_reparam": True}
+    )
+    local.load_state_dict(vanilla.state_dict())
 
     T = 2000
     vanilla_outputs = []
-    flipout_outputs = []
+    local_outputs = []
     for _ in range(T):
         with torch.no_grad():
             vanilla_outputs.append(vanilla(x))
-            flipout_outputs.append(flipout(x))
+            local_outputs.append(local(x))
 
     mean_vanilla = torch.stack(vanilla_outputs).mean(0)
-    mean_flipout = torch.stack(flipout_outputs).mean(0)
+    mean_local = torch.stack(local_outputs).mean(0)
 
     # The two estimators have the same expectation: x @ kernel_loc + bias_loc.
     # abs=0.05: MC std_err ≈ σ_out/√T ≈ 0.1/√2000 ≈ 0.002 per element;
     # 0.05 gives 25× headroom while catching any genuine bias (which would be O(σ)).
     # rel tolerance is avoided because expected values can be near zero.
-    assert mean_vanilla == pytest.approx(mean_flipout.numpy(), abs=0.05), (
-        "flipout and vanilla means diverged — they must agree in expectation"
+    assert mean_vanilla == pytest.approx(mean_local.numpy(), abs=0.05), (
+        "local-reparam and vanilla means diverged — they must agree in expectation"
     )
 
 
@@ -406,15 +453,16 @@ def test_sample_dim_draws_match_analytic_marginal():
     assert out.std(dim=0) == pytest.approx(std_ref.numpy(), rel=0.15)
 
 
-def test_sample_dim_flipout_slices_are_independent_draws():
-    """The flipout estimator also draws fresh noise per sample slice.
+def test_sample_dim_local_reparam_slices_are_independent_draws():
+    """The local-reparam estimator also draws fresh noise per sample slice.
 
-    Flipout samples pre-activations from their marginal, so per-slice
-    independence comes from randn_like on the (S, batch, units) mean — this
-    test pins that behavior against a future refactor sharing noise across S.
+    Local reparameterization samples pre-activations from their marginal, so
+    per-slice independence comes from randn_like on the (S, batch, units)
+    mean — this test pins that behavior against a future refactor sharing
+    noise across S.  Train mode: the estimator is training-only (ADR-0007).
     """
     torch.manual_seed(3)
-    layer = VariationalDense(IN, UNITS, flipout=True, validate_args=True)
+    layer = VariationalDense(IN, UNITS, local_reparam=True, validate_args=True)
     S = 4
     x = torch.randn(BATCH, IN).expand(S, BATCH, IN)
     with torch.no_grad():

@@ -79,7 +79,9 @@ class DeterministicResNet(nn.Module):
         x = F.relu(self.in_proj(x))
         for block in self.blocks:
             x = block(x)
-        return self.out_proj(x)
+        # nn.Module.__call__ is untyped in torch's stubs; anchor the return type.
+        out: torch.Tensor = self.out_proj(x)
+        return out
 
     # ── serialization ─────────────────────────────────────────────────────────
 
