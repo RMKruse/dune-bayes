@@ -40,3 +40,13 @@ testpaths = ["tests"]
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
+
+# Type hints on all public signatures, mechanized (CLAUDE.md tooling rule).
+[[tool.mypy.overrides]]
+module = "dune_bayes.*"
+disallow_untyped_defs = true
+
+# arviz ships no py.typed marker; its returns are handled at our call sites.
+[[tool.mypy.overrides]]
+module = "arviz.*"
+ignore_missing_imports = true

@@ -128,7 +128,9 @@ class NeuralLinearMLP(nn.Module):
             x = layer(x)
             if self._act is not None:
                 x = self._act(x)
-        return self.output_layer(x)
+        # nn.Module.__call__ is untyped in torch's stubs; anchor the return type.
+        out: torch.Tensor = self.output_layer(x)
+        return out
 
     # ── serialization ─────────────────────────────────────────────────────────
 

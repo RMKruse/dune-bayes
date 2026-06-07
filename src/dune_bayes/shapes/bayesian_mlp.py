@@ -91,19 +91,21 @@ class BayesianMLP(nn.Module):
         else:
             self.prior_scale_handle = None
 
-        vd_kwargs = dict(
-            prior_scale=prior_scale,
-            prior_scale_handle=self.prior_scale_handle,
-            kl_divisor=kl_divisor,
-            local_reparam=local_reparam,
-            activation=activation,
-            validate_args=validate_args,
-        )
-
         layers: list[nn.Module] = []
         prev = self.in_features
         for width in self.hidden_dims:
-            layers.append(VariationalDense(prev, width, **vd_kwargs))
+            layers.append(
+                VariationalDense(
+                    prev,
+                    width,
+                    prior_scale=prior_scale,
+                    prior_scale_handle=self.prior_scale_handle,
+                    kl_divisor=kl_divisor,
+                    local_reparam=local_reparam,
+                    activation=activation,
+                    validate_args=validate_args,
+                )
+            )
             prev = width
 
         # Output layer: no activation, no bias (intercept handled elsewhere).

@@ -13,6 +13,7 @@ Everything a variational layer must share lives here:
 """
 
 import math
+from collections.abc import Iterator
 
 import torch
 import torch.nn as nn
@@ -91,7 +92,7 @@ class VariationalLayer(nn.Module):
 # ── module-walk utilities ─────────────────────────────────────────────────────
 
 
-def _iter_variational_layers(model: nn.Module):
+def _iter_variational_layers(model: nn.Module) -> Iterator["VariationalLayer"]:
     """Yield every VariationalLayer in the module tree."""
     for module in model.modules():
         if isinstance(module, VariationalLayer):

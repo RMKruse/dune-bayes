@@ -68,6 +68,11 @@ class PriorScale(VariationalLayer):
             training hot path; True in test fixtures (numerical rule 6).
     """
 
+    # Buffer registered in "fixed" mode; the annotation tells mypy its type
+    # (plain attribute access would route through nn.Module.__getattr__,
+    # which is typed Tensor | Module).
+    _scale_buf: torch.Tensor
+
     def __init__(
         self,
         mode: str = "fixed",
