@@ -8,9 +8,10 @@ Implements BaseFamily (issue 0018 / GitHub #38).
 
 import torch
 import torch.nn.functional as F
+from scipy import stats
 
 from dune_bayes.families.base import BaseFamily
-from dune_bayes.utils import EPS
+from dune_bayes.utils import EPS, to_numpy
 
 
 class StudentTFamily(BaseFamily):
@@ -67,3 +68,27 @@ class StudentTFamily(BaseFamily):
         return torch.distributions.StudentT(
             df=df, loc=loc, scale=scale, validate_args=self.validate_args
         )
+
+    def cdf(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """Student-T CDF via scipy (issue 0093 / GitHub #93).
+
+        torch's StudentT has NO ``.cdf`` — this is the case that forces the
+        scipy route (hand-rolled incomplete-beta math is rejected, issue #93).
+        Reuses ``__call__`` so the links stay single-sourced; eval-time only.
+
+        Args:
+            params: Tensor of shape (..., 3), as in ``__call__``.
+            y: Observed responses, broadcastable to the batch shape (...).
+
+        Returns:
+            Tensor of shape (...), dtype float64.
+        """
+        with torch.no_grad():
+            dist = self(params)
+            value = stats.t.cdf(
+                to_numpy(y),
+                df=to_numpy(dist.df),
+                loc=to_numpy(dist.loc),
+                scale=to_numpy(dist.scale),
+            )
+        return torch.from_numpy(value).to(torch.float64)
