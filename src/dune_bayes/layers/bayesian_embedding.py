@@ -10,12 +10,15 @@ pooling) while common levels stay data-driven.
 A point-embedding fallback (mode="point") is available but not the default;
 it removes the per-level credible interval and the shrinkage behavior.
 
-Sampling is local-reparameterization style (issue 0027 / GitHub #80): each
-gathered row draws fresh per-element noise from its marginal posterior — the
-embedding analog of VariationalDense's flipout estimator. Same expectation and
-exact per-element marginals, lower gradient variance; an index tensor expanded
-along a leading sample dimension therefore yields independent posterior draws
-per slice, which is what the vectorized T-sweeps rely on.
+Estimator split (ADR-0007, issue #85), mirroring VariationalDense:
+  - **Training** uses local reparameterization: each gathered row draws fresh
+    per-element noise from its marginal posterior. Exact per-element
+    marginals, same expectation, lower gradient variance.
+  - **Eval (posterior sampling)** draws coherent table realizations: one full
+    W ~ q(W) per draw, gathered at every index, so repeated levels share an
+    embedding within a draw. An index tensor expanded along a leading sample
+    dimension yields one independent coherent table draw per slice — the
+    contract the vectorized T-sweeps (issue 0027 / GitHub #80) rely on.
 """
 
 from __future__ import annotations
@@ -107,18 +110,42 @@ class BayesianEmbedding(VariationalLayer):
         """
         if self.mode == "variational":
             scale = F.softplus(self.rho)  # (num_embeddings, embedding_dim)
-            # Local reparameterization (issue 0027 / GitHub #80): sample each
-            # gathered row from its marginal N(loc[idx], scale[idx]²) with
-            # fresh per-element noise — the embedding analog of the flipout
-            # estimator.  Per-element marginals are exact, so the ELBO, WAIC
-            # pointwise terms, ribbon quantiles, and the per-row predictive
-            # are unchanged; within-draw correlation across repeated levels is
-            # dropped (lower gradient variance, same expectation).  This is
-            # what makes an expanded (S, batch) idx yield S *independent*
-            # posterior draws in the vectorized sweeps with no shape
-            # convention on idx.
-            loc_g = self.loc[idx]
-            out = loc_g + scale[idx] * torch.randn_like(loc_g)
+            if self.training:
+                # Local reparameterization — TRAINING only (ADR-0007): sample
+                # each gathered row from its marginal N(loc[idx], scale[idx]²)
+                # with fresh per-element noise.  Per-element marginals are
+                # exact, so the ELBO is unchanged; within-draw correlation
+                # across repeated levels is dropped (lower gradient variance,
+                # same expectation) — irrelevant to the per-row loss, fatal to
+                # coherent function draws, hence the eval branch below.
+                loc_g = self.loc[idx]
+                out = loc_g + scale[idx] * torch.randn_like(loc_g)
+            elif idx.dim() == 1:
+                # Coherent posterior draw (ADR-0007): ONE table realization
+                # W ~ q(W) gathered at every index, so repeated levels share
+                # their embedding within the draw.
+                table = self.loc + scale * torch.randn_like(self.loc)
+                out = table[idx]
+            else:
+                # Sample-dimension pass (issue 0027): the leading dim of idx
+                # indexes posterior draws — one fresh coherent table per
+                # slice, never one draw broadcast S ways.
+                S = idx.shape[0]
+                noise = torch.randn(
+                    S,
+                    self.num_embeddings,
+                    self.embedding_dim,
+                    device=self.loc.device,
+                    dtype=self.loc.dtype,
+                )
+                tables = self.loc + scale * noise  # (S, E, D)
+                flat = idx.reshape(S, -1)  # (S, B)
+                gathered = torch.gather(
+                    tables,
+                    1,
+                    flat.unsqueeze(-1).expand(S, flat.shape[1], self.embedding_dim),
+                )
+                out = gathered.reshape(*idx.shape, self.embedding_dim)
 
             # Shared prior scale s from the per-feature PriorScale handle —
             # passed as a tensor so its gradient path stays alive.  The handle

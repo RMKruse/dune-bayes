@@ -299,8 +299,10 @@ class BayesianNAMLSS(nn.Module):
             batch_size: Minibatch size. None (default) keeps full-batch training.
                 Requires X to be a DataModule.
             seed: Integer seed for the DataLoader shuffle generator. Only used
-                when ``batch_size`` is set; controls batch ordering within
-                one model object (consistent with the reproducibility rule).
+                when ``batch_size`` is set; pins batch ordering independent of
+                the global RNG stream. None leaves the shuffle on the global
+                stream — still reproducible under the re-seed protocol
+                (CLAUDE.md seeding rule, GitHub #90).
             callbacks: Optional list of callables with signature (epoch: int) → None,
                 called at the start of each epoch alongside the warm-up callback.
 

@@ -59,3 +59,21 @@ def test_compare_function_shadows_subpackage() -> None:
 )
 def test_subpackages_still_importable(subpackage: str) -> None:
     importlib.import_module(f"dune_bayes.{subpackage}")
+
+
+def test_no_flipout_naming_anywhere_in_package() -> None:
+    """The misnomer "flipout" must not survive in package source (ADR-0007).
+
+    The estimator is local reparameterization (Kingma et al., 2015), not
+    flipout (Wen et al., 2018); the old name would be a methods-section
+    error. Enforced mechanically, like the no-TF rule (CLAUDE.md).
+    """
+    from pathlib import Path
+
+    src_root = Path(db.__file__).parent
+    offenders = [
+        str(path.relative_to(src_root))
+        for path in sorted(src_root.rglob("*.py"))
+        if "flipout" in path.read_text(encoding="utf-8").lower()
+    ]
+    assert offenders == [], f'"flipout" still present in: {offenders}'

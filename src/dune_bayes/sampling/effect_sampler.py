@@ -1,6 +1,11 @@
 """sample_effects — per-feature contribution workhorse (issue 0005 / GitHub #6, #68).
 
-Draws T posterior weight samples and returns per-feature contribution tensors.
+Draws T coherent posterior weight samples and returns per-feature
+contribution tensors.  Coherence (ADR-0007, issue #85): each draw is ONE
+global weight realization applied to every input — eval_mode forces every
+variational layer onto the vanilla path, so the training-only
+local-reparameterization estimator can never leak per-row noise into the
+sampled effects.
 Pure function of (model, data, T) — the PRD's ``EffectSampler``, demoted from
 a stateless class to a plain function (GitHub #68): no mutation of model
 parameters or mode.
