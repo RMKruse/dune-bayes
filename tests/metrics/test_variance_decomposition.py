@@ -18,7 +18,12 @@ import warnings
 import pytest
 import torch
 
-from dune_bayes.families import GammaFamily, NormalFamily, StudentTFamily
+from dune_bayes.families import (
+    GammaFamily,
+    NegativeBinomialFamily,
+    NormalFamily,
+    StudentTFamily,
+)
 from dune_bayes.metrics import variance_decomposition
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.sampling import draw_predictive
@@ -96,11 +101,16 @@ def test_decomposition_shapes_and_law_of_total_variance(model, data_x):
         # df_min=2.0 pins df > 2 so every draw has finite variance (#91);
         # the honest-inf path for df ≤ 2 is tested separately below.
         StudentTFamily(validate_args=True, df_min=2.0),
+        # Discrete support (issue #95): the LOTV split must run unchanged on
+        # integer-valued counts — mean/variance are continuous functions of
+        # (μ, σ) even though y is discrete.
+        NegativeBinomialFamily(validate_args=True),
     ],
     ids=lambda f: type(f).__name__,
 )
 def test_decomposition_is_generic_over_families(any_family, data_x):
-    """One code path serves Normal, Gamma and StudentT (acceptance criterion).
+    """One code path serves Normal, Gamma, StudentT and NegBin (acceptance
+    criteria #91 + #95).
 
     Same independent reference as the tracer: torch's MixtureSameFamily
     moments on identical draws — float32 round-off tolerance, no MC noise.
