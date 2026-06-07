@@ -22,6 +22,8 @@ from dune_bayes.data import DataModule
 from dune_bayes.families import (
     BaseFamily,
     GammaFamily,
+    JohnsonSU,
+    JohnsonSUFamily,
     NormalFamily,
     StudentTFamily,
 )
@@ -52,6 +54,8 @@ __all__ = [
     "BayesianNAMLSS",
     "DataModule",
     "GammaFamily",
+    "JohnsonSU",
+    "JohnsonSUFamily",
     "NormalFamily",
     "PriorScale",
     "QuantileCoverage",
