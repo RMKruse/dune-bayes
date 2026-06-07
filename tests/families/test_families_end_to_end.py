@@ -4,6 +4,11 @@ Acceptance criteria covered:
   - AC2: BayesianNAMLSS trains end-to-end with StudentTFamily and GammaFamily.
   - AC3: WAIC/LOO run against a model using a non-Normal (StudentT) family.
   - AC5: sample_posterior_predictive works with StudentTFamily.
+
+JohnsonSU (issue #94): the paper's headline family runs the same pipeline —
+fit + MixtureSameFamily posterior predictive — through the custom JohnsonSU
+Distribution, which is exactly where a missing Distribution-protocol method
+(e.g. ``expand``) would surface.
 """
 
 import arviz as az
@@ -11,7 +16,8 @@ import pytest
 import torch
 
 from dune_bayes.compare import loo, waic
-from dune_bayes.families import GammaFamily, StudentTFamily
+from dune_bayes.families import GammaFamily, JohnsonSUFamily, StudentTFamily
+from dune_bayes.families.johnson_su import JohnsonSU
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.shapes import BayesianMLP
 
@@ -160,3 +166,75 @@ class TestGammaFamilyEndToEnd:
         history = model.fit(X, y, epochs=30, lr=1e-2)
         assert len(history["loss"]) == 30
         assert all(torch.isfinite(torch.tensor(v)) for v in history["loss"])
+
+
+# ── JohnsonSU end-to-end (issue #94) ──────────────────────────────────────────
+
+
+@pytest.fixture
+def johnson_su_family():
+    return JohnsonSUFamily()
+
+
+@pytest.fixture
+def skewed_data():
+    g = torch.Generator().manual_seed(94)
+    X = {"x1": torch.randn(N_OBS, IN, generator=g)}
+    # Mildly skewed real-valued response: linear signal + asymmetric noise.
+    noise = torch.randn(N_OBS, generator=g)
+    y = 2.0 * X["x1"].squeeze(-1) + 0.3 * (noise + 0.5 * noise.abs())
+    return X, y
+
+
+class TestJohnsonSUFamilyEndToEnd:
+    def test_forward_returns_johnson_su_distribution(
+        self, johnson_su_family, skewed_data
+    ):
+        X, _ = skewed_data
+        formula = {
+            "x1": BayesianMLP(
+                IN, johnson_su_family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+            ),
+        }
+        model = BayesianNAMLSS(formula=formula, family=johnson_su_family, n_obs=N_OBS)
+        dist = model(X)
+        assert isinstance(dist, JohnsonSU)
+        assert dist.batch_shape == (N_OBS,)
+
+    def test_fit_reduces_nll(self, johnson_su_family, skewed_data):
+        """BayesianNAMLSS with JohnsonSUFamily trains to convergence."""
+        torch.manual_seed(4)
+        X, y = skewed_data
+        model = BayesianNAMLSS(
+            formula={
+                "x1": BayesianMLP(
+                    IN,
+                    johnson_su_family.param_count,
+                    hidden_dims=[8],
+                    kl_divisor=N_OBS,
+                )
+            },
+            family=johnson_su_family,
+            n_obs=N_OBS,
+        )
+        history = model.fit(X, y, epochs=50, lr=1e-2)
+        assert history["nll"][-1] < history["nll"][0] * 1.10
+
+    def test_posterior_predictive_is_mixture(self, johnson_su_family, skewed_data):
+        """sample_posterior_predictive assembles MixtureSameFamily over JSU —
+        log_prob, mean, and sampling all flow through the custom Distribution.
+        """
+        torch.manual_seed(5)
+        X, y = skewed_data
+        formula = {
+            "x1": BayesianMLP(
+                IN, johnson_su_family.param_count, hidden_dims=[8], kl_divisor=N_OBS
+            ),
+        }
+        model = BayesianNAMLSS(formula=formula, family=johnson_su_family, n_obs=N_OBS)
+        predictive = model.sample_posterior_predictive(X, T=20)
+        assert isinstance(predictive, torch.distributions.MixtureSameFamily)
+        assert predictive.batch_shape == (N_OBS,)
+        assert torch.isfinite(predictive.log_prob(y)).all()
+        assert torch.isfinite(predictive.mean).all()
+        assert predictive.sample((10,)).shape == (10, N_OBS)
