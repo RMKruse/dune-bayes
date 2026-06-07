@@ -24,6 +24,7 @@ from dune_bayes.families import (
     GammaFamily,
     JohnsonSU,
     JohnsonSUFamily,
+    NegativeBinomialFamily,
     NormalFamily,
     StudentTFamily,
 )
@@ -56,6 +57,7 @@ __all__ = [
     "GammaFamily",
     "JohnsonSU",
     "JohnsonSUFamily",
+    "NegativeBinomialFamily",
     "NormalFamily",
     "PriorScale",
     "QuantileCoverage",
