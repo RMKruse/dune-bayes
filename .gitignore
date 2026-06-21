@@ -218,6 +218,10 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Spike virtualenvs (uv-managed; .venv-torch is the PyTorch env for spikes/, ADR-0006)
+
+# Experiment scratch artifacts (ADR-0008, GitHub #97). Canonical artifacts are
+# deliberately promoted to each experiment's trackable results/ directory.
+/experiments/*/runs/
 .venv-spike/
 .venv-torch/
 

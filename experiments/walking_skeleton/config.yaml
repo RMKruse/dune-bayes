@@ -1,0 +1,13 @@
+experiment: walking_skeleton
+seed: 97
+family: normal
+architecture:
+  hidden_dims: [8]
+draws: 256
+data:
+  n: 100
+training:
+  epochs: 20
+artifacts:
+  root: runs
+  run_name: canonical
