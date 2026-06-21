@@ -1,0 +1,28 @@
+experiment: parameter_recovery_student_t
+seed: 9802
+family: student_t
+parameter_names: [location, scale, df]
+architecture:
+  hidden_dims: [32, 32]
+  prior_scale: 1.0
+  activation: tanh
+draws: 500
+data:
+  n: 256
+truth:
+  intercept: [0.25, 0.2, 1.5]
+  effects:
+    - {kind: sin, amplitude: 1.0, frequency: 1.0}
+    - {kind: cos, amplitude: 0.35, frequency: 1.0}
+    - {kind: sin, amplitude: 0.45, frequency: 2.0}
+calibration:
+  levels: [0.5, 0.8, 0.9, 0.95]
+recovery:
+  credible_level: 0.9
+training:
+  epochs: 800
+  learning_rate: 0.01
+  warmup_epochs: 40
+artifacts:
+  root: runs
+  run_name: canonical

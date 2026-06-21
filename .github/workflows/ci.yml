@@ -59,6 +59,6 @@ jobs:
       - name: Run every experiment smoke
         shell: bash
         run: |
-          for config in experiments/*/config.yaml; do
+          for config in experiments/*/config*.yaml; do
             uv run python "$(dirname "$config")/run.py" "$config" --smoke
           done
