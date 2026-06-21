@@ -31,6 +31,7 @@ experiments = [
     "jax>=0.7",
     "numpyro>=0.19",
     "pyyaml>=6.0",
+    "ucimlrepo>=0.0.7",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -44,6 +45,10 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not experiment'"
+markers = [
+    "experiment: opt-in full paper experiments excluded from the core suite",
+]
 
 [tool.mypy]
 python_version = "3.12"

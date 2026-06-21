@@ -1,0 +1,72 @@
+experiment: uci_benchmark
+seed: 102
+datasets:
+  - name: autompg
+    family: normal
+    response: mpg
+    split_seed: 10201
+    source: {kind: uci, id: 9}
+  - name: concrete
+    family: normal
+    response: target
+    split_seed: 10202
+    source: {kind: uci, id: 165}
+  - name: energy
+    family: normal
+    response: target
+    split_seed: 10203
+    source: {kind: uci, id: 242}
+  - name: kin8nm
+    family: normal
+    response: target
+    split_seed: 10204
+    source: {kind: openml, id: 189}
+  - name: naval
+    family: beta
+    response: target
+    split_seed: 10205
+    response_transform: open_unit_interval
+    source: {kind: uci, id: 316}
+  - name: power
+    family: normal
+    response: target
+    split_seed: 10206
+    source: {kind: uci, id: 294}
+  - name: protein
+    family: normal
+    response: target
+    split_seed: 10207
+    source: {kind: uci, id: 265}
+  - name: wine
+    family: normal
+    response: target
+    split_seed: 10208
+    source: {kind: openml, id: 40691}
+  - name: yacht
+    family: normal
+    response: target
+    split_seed: 10209
+    source: {kind: uci, id: 243}
+  - name: bike
+    family: negative_binomial
+    response: target
+    split_seed: 10210
+    source: {kind: uci, id: 275}
+data:
+  cache_dir: data/cache
+  split_dir: data/splits
+  test_fraction: 0.2
+architecture:
+  hidden_dims: [16]
+  prior_scale: 1.0
+  activation: tanh
+training:
+  epochs: 250
+  learning_rate: 0.01
+  warmup_epochs: 20
+draws: 500
+predictive_samples: 500
+calibration_bins: 10
+artifacts:
+  root: runs
+  run_name: canonical
