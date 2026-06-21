@@ -1,0 +1,26 @@
+experiment: disentanglement
+seed: 9901
+family: normal
+architecture:
+  hidden_dims: [32, 32]
+  prior_scale: 1.0
+  activation: tanh
+draws: 500
+data:
+  n: 384
+  grid_size: 200
+  dense_fraction: 0.8
+  dense_region: [-1.0, 0.0]
+  sparse_region: [0.0, 1.0]
+truth:
+  location_amplitude: 0.8
+  noisy_scale: 0.8
+  quiet_scale: 0.15
+  transition_width: 0.08
+training:
+  epochs: 800
+  learning_rate: 0.01
+  warmup_epochs: 40
+artifacts:
+  root: runs
+  run_name: canonical
