@@ -31,13 +31,34 @@ jobs:
         run: uv sync --locked --extra dev
 
       - name: ruff format
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check src tests experiments
 
       - name: ruff lint
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests experiments
 
       - name: mypy
         run: uv run mypy src/dune_bayes
 
       - name: pytest
         run: uv run pytest -q
+
+  experiment-smokes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Install experiment dependencies
+        run: uv sync --locked --extra experiments
+
+      - name: Run every experiment smoke
+        shell: bash
+        run: |
+          for config in experiments/*/config.yaml; do
+            uv run python "$(dirname "$config")/run.py" "$config" --smoke
+          done
