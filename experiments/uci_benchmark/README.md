@@ -27,3 +27,28 @@ sample estimator, and calibration is a ten-bin PIT reliability table
 (randomized and seeded for bike). Runs land under `runs/`; after inspecting a
 full run, promote the complete run directory to `results/` following the
 repository experiment convention.
+
+## Common predictive adapter
+
+Every comparison model implements the two-method `BenchmarkAdapter` in
+`adapters.py`:
+
+```text
+fit(train_data, *, smoke) -> None
+predict(features, target, *, draws, predictive_samples, seed)
+    -> PredictiveResult(samples, log_density, cdf)
+```
+
+`samples` has shape `(M, n)` and feeds `dune_bayes.metrics.crps`;
+`log_density` and `cdf` each have shape `(n,)` and feed NLL and PIT-bin
+calibration. The runner owns all scoring and passes every adapter the same
+training `DataModule`, held-out feature tensors, targets, and persisted split.
+This keeps model-specific evaluation code out of comparison tables.
+
+The `dune_bayes`, `plain_mlp`, and `deep_ensemble` adapters prove the seam
+end-to-end. The latter two are conventional sanity floors: each uses a
+homoscedastic Gaussian residual, and the ensemble mixes independently
+initialized MLP predictives. They do not provide dune-bayes's distributional
+separation of aleatoric family uncertainty from epistemic uncertainty on
+shape functions. Per-baseline tables live below
+`metrics/<dataset>/<model>/`; `metrics/comparison.csv` is the combined panel.

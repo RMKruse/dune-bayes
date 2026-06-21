@@ -1,11 +1,10 @@
-"""UCI benchmark panel runner (ADR-0008, GitHub #102)."""
+"""UCI benchmark panel runner and baseline scoring (ADR-0008, GitHub #102–#103)."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import importlib
-import math
 import shutil
 import sys
 import urllib.request
@@ -28,11 +27,17 @@ from dune_bayes.families import (  # noqa: E402
     NegativeBinomialFamily,
     NormalFamily,
 )
-from dune_bayes.metrics import crps, pit  # noqa: E402
+from dune_bayes.metrics import crps  # noqa: E402
 from dune_bayes.model import BayesianNAMLSS  # noqa: E402
-from dune_bayes.sampling import draw_predictive, pointwise_log_lik  # noqa: E402
 from dune_bayes.shapes import BayesianMLP  # noqa: E402
 from dune_bayes.utils import EPS  # noqa: E402
+from experiments.uci_benchmark.adapters import (  # noqa: E402
+    BenchmarkAdapter,
+    DeepEnsembleAdapter,
+    DuneBayesAdapter,
+    PlainMLPAdapter,
+    PredictiveResult,
+)
 
 _EXPERIMENT_DIR = Path(__file__).resolve().parent
 
@@ -157,7 +162,7 @@ def _score_dataset(
     paths: ArtifactPaths,
     *,
     smoke: bool,
-) -> None:
+) -> list[dict[str, object]]:
     """Fit dune-bayes and write held-out headline metrics."""
     name = str(dataset["name"])
     cache_key = _cache_key(dataset, smoke=smoke)
@@ -194,34 +199,105 @@ def _score_dataset(
         family=family,
         n_obs=train_data.n_obs,
     )
-    epochs = 1 if smoke else int(config["training"]["epochs"])
     draws_count = min(int(config["draws"]), 16) if smoke else int(config["draws"])
     predictive_samples = (
         min(int(config["predictive_samples"]), 32)
         if smoke
         else int(config["predictive_samples"])
     )
-    model.fit(
-        train_data,
-        epochs=epochs,
-        lr=float(config["training"]["learning_rate"]),
-        warmup_epochs=min(int(config["training"]["warmup_epochs"]), epochs),
-    )
-    draws = draw_predictive(model, test_features, T=draws_count)
-    log_lik = pointwise_log_lik(model, draws.summed_samples, test_target)
-    nll = -torch.logsumexp(log_lik, dim=0) + math.log(draws_count)
-    predictive = draws.predictive.sample((predictive_samples,))
-    crps_values = crps(predictive, test_target)
-    pit_values = pit(
+    adapter: BenchmarkAdapter = DuneBayesAdapter(
+        model,
         family,
-        draws.summed_samples,
+        epochs=int(config["training"]["epochs"]),
+        learning_rate=float(config["training"]["learning_rate"]),
+        warmup_epochs=int(config["training"]["warmup_epochs"]),
+        randomized_pit=family_name == "negative_binomial",
+    )
+    adapter.fit(train_data, smoke=smoke)
+    prediction = adapter.predict(
+        test_features,
         test_target,
-        randomized=family_name == "negative_binomial",
+        draws=draws_count,
+        predictive_samples=predictive_samples,
         seed=int(dataset["split_seed"]),
     )
+    comparison = _write_scores(
+        prediction,
+        adapter=adapter,
+        target=test_target,
+        dataset=name,
+        family=family_name,
+        bins=int(config["calibration_bins"]),
+        metric_dir=paths.metrics / name,
+    )
+    plain: BenchmarkAdapter = PlainMLPAdapter(
+        hidden_dims=hidden_dims,
+        epochs=int(config["training"]["epochs"]),
+        learning_rate=float(config["training"]["learning_rate"]),
+    )
+    plain.fit(train_data, smoke=smoke)
+    plain_prediction = plain.predict(
+        test_features,
+        test_target,
+        draws=draws_count,
+        predictive_samples=predictive_samples,
+        seed=int(dataset["split_seed"]),
+    )
+    comparison.extend(
+        _write_scores(
+            plain_prediction,
+            adapter=plain,
+            target=test_target,
+            dataset=name,
+            family="gaussian_residual",
+            bins=int(config["calibration_bins"]),
+            metric_dir=paths.metrics / name / plain.name,
+        )
+    )
+    ensemble: BenchmarkAdapter = DeepEnsembleAdapter(
+        members=int(config["baselines"]["deep_ensemble_members"]),
+        hidden_dims=hidden_dims,
+        epochs=int(config["training"]["epochs"]),
+        learning_rate=float(config["training"]["learning_rate"]),
+    )
+    ensemble.fit(train_data, smoke=smoke)
+    ensemble_prediction = ensemble.predict(
+        test_features,
+        test_target,
+        draws=draws_count,
+        predictive_samples=predictive_samples,
+        seed=int(dataset["split_seed"]),
+    )
+    comparison.extend(
+        _write_scores(
+            ensemble_prediction,
+            adapter=ensemble,
+            target=test_target,
+            dataset=name,
+            family="gaussian_residual_mixture",
+            bins=int(config["calibration_bins"]),
+            metric_dir=paths.metrics / name / ensemble.name,
+        )
+    )
+    return comparison
 
-    metric_dir = paths.metrics / name
-    summary = {"dataset": name, "family": family_name, "n_test": len(test)}
+
+def _write_scores(
+    prediction: PredictiveResult,
+    *,
+    adapter: BenchmarkAdapter,
+    target: torch.Tensor,
+    dataset: str,
+    family: str,
+    bins: int,
+    metric_dir: Path,
+) -> list[dict[str, object]]:
+    """Score one adapter prediction and write its public metric artifacts."""
+    nll = -prediction.log_density
+    crps_values = crps(prediction.samples, target)
+    pit_values = prediction.cdf.to(torch.float64)
+
+    summary = {"dataset": dataset, "family": family, "n_test": len(target)}
     _write_csv(
         metric_dir / "nll.csv",
         [{**summary, "mean_nll": float(nll.mean())}],
@@ -230,22 +306,33 @@ def _score_dataset(
         metric_dir / "crps.csv",
         [{**summary, "mean_crps": float(crps_values.mean())}],
     )
-    bins = int(config["calibration_bins"])
     counts, edges = np.histogram(pit_values.numpy(), bins=bins, range=(0.0, 1.0))
     _write_csv(
         metric_dir / "calibration.csv",
         [
             {
-                "dataset": name,
+                "dataset": dataset,
                 "bin_lower": float(edges[index]),
                 "bin_upper": float(edges[index + 1]),
                 "count": int(count),
-                "fraction": float(count / len(test)),
+                "fraction": float(count / len(target)),
                 "expected_fraction": float(1.0 / bins),
             }
             for index, count in enumerate(counts)
         ],
     )
+    fractions = counts / len(target)
+    return [
+        {
+            "dataset": dataset,
+            "family": family,
+            "model": adapter.name,
+            "n_test": len(target),
+            "mean_nll": float(nll.mean()),
+            "mean_crps": float(crps_values.mean()),
+            "calibration_error": float(np.abs(fractions - 1.0 / bins).mean()),
+        }
+    ]
 
 
 def _run(
@@ -263,9 +350,11 @@ def _run(
             raise ValueError(f"Unknown dataset {dataset_name!r}.")
     elif smoke:
         datasets = datasets[:1]
+    comparison: list[dict[str, object]] = []
     for dataset in datasets:
         _prepare_dataset(config, dataset, smoke=smoke)
-        _score_dataset(config, dataset, paths, smoke=smoke)
+        comparison.extend(_score_dataset(config, dataset, paths, smoke=smoke))
+    _write_csv(paths.metrics / "comparison.csv", comparison)
 
 
 def main(argv: Sequence[str] | None = None) -> None:

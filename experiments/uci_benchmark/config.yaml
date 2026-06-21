@@ -64,6 +64,8 @@ training:
   epochs: 250
   learning_rate: 0.01
   warmup_epochs: 20
+baselines:
+  deep_ensemble_members: 5
 draws: 500
 predictive_samples: 500
 calibration_bins: 10

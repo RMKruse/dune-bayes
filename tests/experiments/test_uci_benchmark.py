@@ -1,4 +1,4 @@
-"""UCI benchmark panel boundaries (ADR-0008, GitHub #102)."""
+"""UCI benchmark panel boundaries (ADR-0008, GitHub #102–#103)."""
 
 from __future__ import annotations
 
@@ -95,6 +95,92 @@ def test_smoke_writes_nll_crps_and_pit_calibration_tables(tmp_path: Path) -> Non
     assert len(calibration) == 10
     assert sum(int(row["count"]) for row in calibration) == int(nll[0]["n_test"])
     assert np.isclose(sum(float(row["fraction"]) for row in calibration), 1.0)
+
+
+def test_dune_bayes_is_scored_through_the_common_comparison_table(
+    tmp_path: Path,
+) -> None:
+    """The package model obeys the same held-out prediction contract as baselines."""
+    completed = _run_smoke(_smoke_config(tmp_path))
+    assert completed.returncode == 0, completed.stderr
+
+    comparison = _read_rows(
+        tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics" / "comparison.csv"
+    )
+    dune = next(row for row in comparison if row["model"] == "dune_bayes")
+    assert dune["dataset"] == "autompg"
+    assert np.isfinite(float(dune["mean_nll"]))
+    assert np.isfinite(float(dune["mean_crps"]))
+    assert np.isfinite(float(dune["calibration_error"]))
+
+
+def test_plain_mlp_is_scored_on_the_same_held_out_observations(
+    tmp_path: Path,
+) -> None:
+    """The conventional point predictor has a Gaussian predictive sanity floor."""
+    completed = _run_smoke(_smoke_config(tmp_path))
+    assert completed.returncode == 0, completed.stderr
+
+    comparison = _read_rows(
+        tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics" / "comparison.csv"
+    )
+    rows = {row["model"]: row for row in comparison}
+    plain = rows["plain_mlp"]
+    assert plain["dataset"] == rows["dune_bayes"]["dataset"] == "autompg"
+    assert plain["n_test"] == rows["dune_bayes"]["n_test"]
+    assert np.isfinite(float(plain["mean_nll"]))
+    assert np.isfinite(float(plain["mean_crps"]))
+    assert np.isfinite(float(plain["calibration_error"]))
+
+
+def test_deep_ensemble_completes_the_three_model_sanity_panel(
+    tmp_path: Path,
+) -> None:
+    """Independent MLP members contribute one mixture-predictive comparison row."""
+    completed = _run_smoke(_smoke_config(tmp_path))
+    assert completed.returncode == 0, completed.stderr
+
+    comparison = _read_rows(
+        tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics" / "comparison.csv"
+    )
+    assert {row["model"] for row in comparison} == {
+        "dune_bayes",
+        "plain_mlp",
+        "deep_ensemble",
+    }
+    assert {row["dataset"] for row in comparison} == {"autompg"}
+    assert len({row["n_test"] for row in comparison}) == 1
+    ensemble = next(row for row in comparison if row["model"] == "deep_ensemble")
+    assert np.isfinite(float(ensemble["mean_nll"]))
+    assert np.isfinite(float(ensemble["mean_crps"]))
+    assert np.isfinite(float(ensemble["calibration_error"]))
+
+
+def test_readme_documents_the_common_predictive_adapter() -> None:
+    """Future baselines can implement the scoring seam without reading its code."""
+    readme = Path("experiments/uci_benchmark/README.md").read_text(encoding="utf-8")
+
+    assert "fit(train_data, *, smoke)" in readme
+    assert "predict(features, target" in readme
+    assert "samples" in readme
+    assert "log_density" in readme
+    assert "cdf" in readme
+    assert "plain_mlp" in readme
+    assert "deep_ensemble" in readme
+
+
+def test_results_include_a_promoted_three_model_smoke_comparison() -> None:
+    """The sanity-floor result is reviewable without rerunning the experiment."""
+    rows = _read_rows(
+        Path("experiments/uci_benchmark/results/smoke/metrics/comparison.csv")
+    )
+
+    assert {row["model"] for row in rows} == {
+        "dune_bayes",
+        "plain_mlp",
+        "deep_ensemble",
+    }
+    assert all(row["dataset"] == "autompg" for row in rows)
 
 
 def test_panel_config_declares_standard_datasets_and_response_families() -> None:

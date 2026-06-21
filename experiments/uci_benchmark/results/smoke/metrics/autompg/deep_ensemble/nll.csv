@@ -1,0 +1,2 @@
+dataset,family,n_test,mean_nll
+autompg,gaussian_residual_mixture,4,3.1994872863761135

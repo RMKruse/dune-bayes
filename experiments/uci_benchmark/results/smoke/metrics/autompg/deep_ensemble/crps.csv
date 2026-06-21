@@ -1,0 +1,2 @@
+dataset,family,n_test,mean_crps
+autompg,gaussian_residual_mixture,4,2.4617572167227344
