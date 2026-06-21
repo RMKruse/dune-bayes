@@ -21,6 +21,11 @@ uv run --extra experiments python experiments/walking_skeleton/run.py \
 
 Use `--smoke` for the tiny CI workload. Full runs are manual and opt-in.
 
+The paper-facing simulations currently include:
+
+- `parameter_recovery/`: centered effect recovery and per-parameter coverage;
+- `disentanglement/`: dense/noisy versus sparse/quiet variance decomposition.
+
 ## Artifact convention
 
 The harness writes one run beneath
