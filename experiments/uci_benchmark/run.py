@@ -1,0 +1,293 @@
+"""UCI benchmark panel runner (ADR-0008, GitHub #102)."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import importlib
+import math
+import shutil
+import sys
+import urllib.request
+from collections.abc import Mapping, Sequence
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import torch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+_harness = importlib.import_module("experiments._harness")
+ArtifactPaths = _harness.ArtifactPaths
+run_experiment = _harness.run_experiment
+
+from dune_bayes.data import DataModule  # noqa: E402
+from dune_bayes.families import (  # noqa: E402
+    BetaFamily,
+    NegativeBinomialFamily,
+    NormalFamily,
+)
+from dune_bayes.metrics import crps, pit  # noqa: E402
+from dune_bayes.model import BayesianNAMLSS  # noqa: E402
+from dune_bayes.sampling import draw_predictive, pointwise_log_lik  # noqa: E402
+from dune_bayes.shapes import BayesianMLP  # noqa: E402
+from dune_bayes.utils import EPS  # noqa: E402
+
+_EXPERIMENT_DIR = Path(__file__).resolve().parent
+
+
+def _data_path(config: Mapping[str, Any], key: str) -> Path:
+    """Resolve one configured data directory relative to this experiment."""
+    path = Path(str(config["data"][key]))
+    if not path.is_absolute():
+        path = _EXPERIMENT_DIR / path
+    return path.resolve()
+
+
+def _cache_key(dataset: Mapping[str, Any], *, smoke: bool) -> str:
+    """Keep CI fixtures from masquerading as full benchmark downloads."""
+    name = str(dataset["name"])
+    return f"{name}-smoke" if smoke else name
+
+
+def _catalog_frame(
+    config: Mapping[str, Any], dataset: Mapping[str, Any]
+) -> pd.DataFrame:
+    """Fetch one pinned catalog dataset into the common numeric table contract."""
+    source = dataset["source"]
+    if source["kind"] == "uci":
+        from ucimlrepo import fetch_ucirepo
+
+        fetched = fetch_ucirepo(id=int(source["id"]))
+        features = fetched.data.features.copy()
+        targets = fetched.data.targets
+    elif source["kind"] == "openml":
+        from sklearn.datasets import fetch_openml
+
+        features, targets = fetch_openml(
+            data_id=int(source["id"]),
+            return_X_y=True,
+            as_frame=True,
+            data_home=_data_path(config, "cache_dir") / "_openml",
+        )
+    else:
+        raise ValueError(f"Unknown dataset source kind {source['kind']!r}.")
+
+    if isinstance(targets, pd.DataFrame):
+        target = targets.iloc[:, int(dataset.get("target_index", 0))]
+    else:
+        target = targets
+    numeric_features = pd.get_dummies(features, dtype=float)
+    frame = numeric_features.copy()
+    response = str(dataset["response"])
+    frame[response] = pd.to_numeric(target, errors="coerce").to_numpy()
+    frame = frame.replace([np.inf, -np.inf], np.nan).dropna().reset_index(drop=True)
+    if dataset.get("response_transform") == "open_unit_interval":
+        values = frame[response]
+        if bool(((values < 0.0) | (values > 1.0)).any()):
+            raise ValueError(f"{dataset['name']} response is not bounded in [0, 1].")
+        # Beta has open support; this minimal affine contraction moves exact
+        # boundary observations inward by the package-wide numerical floor.
+        frame[response] = values * (1.0 - 2.0 * EPS) + EPS
+    return frame
+
+
+def _prepare_dataset(
+    config: Mapping[str, Any], dataset: Mapping[str, Any], *, smoke: bool
+) -> None:
+    """Cache one source and create its split exactly once."""
+    cache_dir = _data_path(config, "cache_dir")
+    split_dir = _data_path(config, "split_dir")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    split_dir.mkdir(parents=True, exist_ok=True)
+
+    name = str(dataset["name"])
+    cache_key = _cache_key(dataset, smoke=smoke)
+    cached = cache_dir / f"{cache_key}.csv"
+    if not cached.exists():
+        if smoke:
+            shutil.copyfile(_EXPERIMENT_DIR / "fixtures" / f"{name}_smoke.csv", cached)
+        elif "url" in dataset:
+            temporary = cached.with_suffix(".csv.partial")
+            try:
+                with (
+                    urllib.request.urlopen(str(dataset["url"])) as response,  # noqa: S310
+                    temporary.open("wb") as handle,
+                ):
+                    shutil.copyfileobj(response, handle)
+                temporary.replace(cached)
+            finally:
+                temporary.unlink(missing_ok=True)
+        else:
+            temporary = cached.with_suffix(".csv.partial")
+            try:
+                _catalog_frame(config, dataset).to_csv(temporary, index=False)
+                temporary.replace(cached)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+    split_path = split_dir / f"{cache_key}.npz"
+    if split_path.exists():
+        return
+    n_rows = len(pd.read_csv(cached))
+    rng = np.random.default_rng(int(dataset["split_seed"]))
+    indices = rng.permutation(n_rows)
+    n_test = max(1, round(n_rows * float(config["data"]["test_fraction"])))
+    np.savez(
+        split_path,
+        train_indices=np.sort(indices[n_test:]),
+        test_indices=np.sort(indices[:n_test]),
+        n_rows=np.asarray(n_rows),
+    )
+
+
+def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
+    """Write a non-empty list of records with a stable column order."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _score_dataset(
+    config: Mapping[str, Any],
+    dataset: Mapping[str, Any],
+    paths: ArtifactPaths,
+    *,
+    smoke: bool,
+) -> None:
+    """Fit dune-bayes and write held-out headline metrics."""
+    name = str(dataset["name"])
+    cache_key = _cache_key(dataset, smoke=smoke)
+    frame = pd.read_csv(_data_path(config, "cache_dir") / f"{cache_key}.csv")
+    with np.load(_data_path(config, "split_dir") / f"{cache_key}.npz") as split:
+        train = frame.iloc[split["train_indices"]].reset_index(drop=True)
+        test = frame.iloc[split["test_indices"]].reset_index(drop=True)
+
+    response = str(dataset["response"])
+    train_data = DataModule(train, response=response, numeric_scaling={})
+    test_features = train_data.transform(test)
+    test_target = torch.tensor(test[response].to_numpy(), dtype=torch.float32)
+    family_name = str(dataset["family"])
+    if family_name == "negative_binomial":
+        family = NegativeBinomialFamily()
+    elif family_name == "beta":
+        family = BetaFamily()
+    else:
+        family = NormalFamily()
+    hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
+    formula = {
+        feature: BayesianMLP(
+            1,
+            family.param_count,
+            hidden_dims=hidden_dims,
+            prior_scale=float(config["architecture"]["prior_scale"]),
+            kl_divisor=train_data.n_obs,
+            activation=str(config["architecture"]["activation"]),
+        )
+        for feature in train_data.features
+    }
+    model = BayesianNAMLSS(
+        formula=formula,
+        family=family,
+        n_obs=train_data.n_obs,
+    )
+    epochs = 1 if smoke else int(config["training"]["epochs"])
+    draws_count = min(int(config["draws"]), 16) if smoke else int(config["draws"])
+    predictive_samples = (
+        min(int(config["predictive_samples"]), 32)
+        if smoke
+        else int(config["predictive_samples"])
+    )
+    model.fit(
+        train_data,
+        epochs=epochs,
+        lr=float(config["training"]["learning_rate"]),
+        warmup_epochs=min(int(config["training"]["warmup_epochs"]), epochs),
+    )
+    draws = draw_predictive(model, test_features, T=draws_count)
+    log_lik = pointwise_log_lik(model, draws.summed_samples, test_target)
+    nll = -torch.logsumexp(log_lik, dim=0) + math.log(draws_count)
+    predictive = draws.predictive.sample((predictive_samples,))
+    crps_values = crps(predictive, test_target)
+    pit_values = pit(
+        family,
+        draws.summed_samples,
+        test_target,
+        randomized=family_name == "negative_binomial",
+        seed=int(dataset["split_seed"]),
+    )
+
+    metric_dir = paths.metrics / name
+    summary = {"dataset": name, "family": family_name, "n_test": len(test)}
+    _write_csv(
+        metric_dir / "nll.csv",
+        [{**summary, "mean_nll": float(nll.mean())}],
+    )
+    _write_csv(
+        metric_dir / "crps.csv",
+        [{**summary, "mean_crps": float(crps_values.mean())}],
+    )
+    bins = int(config["calibration_bins"])
+    counts, edges = np.histogram(pit_values.numpy(), bins=bins, range=(0.0, 1.0))
+    _write_csv(
+        metric_dir / "calibration.csv",
+        [
+            {
+                "dataset": name,
+                "bin_lower": float(edges[index]),
+                "bin_upper": float(edges[index + 1]),
+                "count": int(count),
+                "fraction": float(count / len(test)),
+                "expected_fraction": float(1.0 / bins),
+            }
+            for index, count in enumerate(counts)
+        ],
+    )
+
+
+def _run(
+    config: Mapping[str, Any],
+    paths: ArtifactPaths,
+    smoke: bool,
+    *,
+    dataset_name: str | None = None,
+) -> None:
+    """Prepare and score the configured benchmark datasets."""
+    datasets = config["datasets"]
+    if dataset_name is not None:
+        datasets = [item for item in datasets if item["name"] == dataset_name]
+        if not datasets:
+            raise ValueError(f"Unknown dataset {dataset_name!r}.")
+    elif smoke:
+        datasets = datasets[:1]
+    for dataset in datasets:
+        _prepare_dataset(config, dataset, smoke=smoke)
+        _score_dataset(config, dataset, paths, smoke=smoke)
+
+
+def main(argv: Sequence[str] | None = None) -> None:
+    """Run the UCI benchmark panel from one complete config.
+
+    Args:
+        argv: Optional CLI arguments; defaults to ``sys.argv``.
+    """
+    parser = argparse.ArgumentParser()
+    parser.add_argument("config", type=Path)
+    parser.add_argument("--smoke", action="store_true")
+    parser.add_argument("--dataset")
+    args = parser.parse_args(argv)
+
+    def selected_run(
+        config: Mapping[str, Any], paths: ArtifactPaths, smoke: bool
+    ) -> None:
+        """Bind the optional public dataset selector to the harness callback."""
+        _run(config, paths, smoke, dataset_name=args.dataset)
+
+    run_experiment(args.config, smoke=args.smoke, experiment=selected_run)
+
+
+if __name__ == "__main__":
+    main()

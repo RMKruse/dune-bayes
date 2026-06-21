@@ -222,6 +222,7 @@ __marimo__/
 # Experiment scratch artifacts (ADR-0008, GitHub #97). Canonical artifacts are
 # deliberately promoted to each experiment's trackable results/ directory.
 /experiments/*/runs/
+/experiments/uci_benchmark/data/
 .venv-spike/
 .venv-torch/
 
