@@ -1,0 +1,13 @@
+{
+  "experiment": "hmc_agreement",
+  "nuts": {
+    "chains": 4,
+    "divergences": 0,
+    "ess_bulk_min": 1330.4240579230996,
+    "r_hat_max": 1.0037415328129553,
+    "samples_per_chain": 750,
+    "warmup": 750
+  },
+  "seed": 101,
+  "smoke": false
+}

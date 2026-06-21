@@ -1,0 +1,30 @@
+experiment: hmc_agreement
+seed: 101
+family: normal
+architecture:
+  hidden_dims: []
+  prior_scale: 1.0
+data:
+  n: 96
+  noise_seed: 1101
+  feature_correlation: 0.85
+  truth:
+    x1_weight: [1.0, -0.25]
+    x2_weight: [-0.6, 0.2]
+    intercept: [0.3, -0.5]
+training:
+  epochs: 10000
+  lr: 0.003
+  warmup_epochs: 500
+nuts:
+  warmup: 750
+  samples: 750
+  chains: 4
+  target_accept_prob: 0.9
+comparison:
+  credible_mass: 0.9
+  grid_points: 61
+  vi_draws: 4000
+artifacts:
+  root: runs
+  run_name: canonical

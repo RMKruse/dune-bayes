@@ -26,6 +26,7 @@ The paper-facing simulations currently include:
 - `parameter_recovery/`: centered effect recovery and per-parameter coverage;
 - `disentanglement/`: dense/noisy versus sparse/quiet variance decomposition.
 - `uci_benchmark/`: shared-split UCI panel with NLL, CRPS, and PIT calibration.
+- `hmc_agreement/`: fixed-prior VI versus NumPyro NUTS effect-band validation.
 
 ## Artifact convention
 

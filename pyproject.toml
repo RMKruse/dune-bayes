@@ -46,9 +46,10 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-m 'not experiment'"
+addopts = "-m 'not hmc and not experiment'"
 markers = [
     "experiment: opt-in full paper experiments excluded from the core suite",
+    "hmc: opt-in NumPyro/NUTS validation tests requiring experiment dependencies",
 ]
 
 [tool.mypy]
