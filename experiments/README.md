@@ -45,3 +45,26 @@ To promote a run, inspect its metrics and figures, then copy the complete run
 directory into the experiment's `results/` directory. Promotion is deliberate:
 never point a config directly at `results/`, and never commit from `runs/`.
 Record any paper-facing interpretation in the experiment-specific README.
+
+## Publication evidence manifest
+
+`experiments/publication/evidence-manifest.yaml` is the paper-facing ledger for
+promoted evidence. Each claim records its claim family, whether it requires full
+paper evidence or smoke-only validation, the canonical artifact path(s), expected
+artifact class, required files, and minimal provenance from `run.json` such as
+experiment name and seed. Entries may also include `file_hashes` for artifacts
+whose bytes should be frozen; the validator reports a stale-file failure when a
+recorded SHA-256 no longer matches.
+
+Validate the ledger with:
+
+```bash
+uv run --extra experiments python -m experiments.publication.evidence \
+  experiments/publication/evidence-manifest.yaml --root .
+```
+
+The command is intentionally a publication gate over promoted `results/`
+artifacts, not a runner for new experiments. Scratch output under `runs/` must be
+inspected and promoted first. At the moment the benchmark/comparator claim is
+listed but still points at a smoke artifact, so the gate reports `NOT READY`
+until a full canonical UCI/comparator panel is promoted.
