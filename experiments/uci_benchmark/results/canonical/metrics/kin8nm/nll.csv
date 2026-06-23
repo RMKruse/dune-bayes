@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+kin8nm,normal,dune_bayes,1638,0.11432074689447685

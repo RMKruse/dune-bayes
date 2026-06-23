@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+power,normal,dune_bayes,1914,1754.3630219228194

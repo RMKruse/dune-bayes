@@ -258,15 +258,29 @@ def test_checked_in_manifest_covers_required_claim_families() -> None:
     }
 
 
-def test_checked_in_manifest_rejects_current_benchmark_smoke_artifact() -> None:
-    """The real ledger is a gate: smoke UCI output cannot satisfy the paper."""
+def test_checked_in_manifest_accepts_promoted_benchmark_evidence() -> None:
+    """The real ledger points at full promoted evidence, not a smoke tracer."""
     report = validate_evidence_manifest(MANIFEST, root=Path("."))
 
-    assert report.ready is False
-    assert (
-        "benchmark-comparator-panel: requires full paper evidence but "
-        "run.json marks the artifact as smoke"
-    ) in report.failures
+    assert report.ready is True
+    assert report.failures == ()
+
+
+def test_checked_in_benchmark_claims_pass_publication_gate() -> None:
+    """The promoted UCI/comparator claim satisfies the benchmark gate."""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "experiments/uci_benchmark/publication_gate.py",
+            "experiments/uci_benchmark/results/canonical/benchmark-claims.yaml",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "benchmark-comparator-panel: ready" in completed.stdout
 
 
 def test_cli_prints_actionable_readiness_failures(tmp_path: Path) -> None:

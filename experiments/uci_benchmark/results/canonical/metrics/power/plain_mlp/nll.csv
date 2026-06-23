@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+power,gaussian_residual,plain_mlp,1914,2.8377870982717197

@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+protein,gaussian_residual_mixture,deep_ensemble,9146,2.6874221854986438

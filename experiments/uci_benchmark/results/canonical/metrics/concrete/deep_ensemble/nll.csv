@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+concrete,gaussian_residual_mixture,deep_ensemble,206,3.105517004608573

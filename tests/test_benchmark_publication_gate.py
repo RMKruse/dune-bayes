@@ -223,6 +223,34 @@ def test_documented_manifest_exclusion_allows_missing_metric(
     assert "uci-benchmark-panel: ready" in completed.stdout
 
 
+def test_documented_manifest_exclusion_allows_unavailable_comparator(
+    tmp_path: Path,
+) -> None:
+    """A baseline with every metric excluded does not need a comparison row."""
+    result = _write_full_result(tmp_path)
+    manifest = _write_manifest(
+        tmp_path,
+        result,
+        exclusions=[
+            {
+                "dataset": dataset,
+                "baseline": "lanam",
+                "metric": "*",
+                "reason": "LA-NAM optional environment was unavailable.",
+            }
+            for dataset in ("autompg", "bike")
+        ],
+    )
+    payload = yaml.safe_load(manifest.read_text(encoding="utf-8"))
+    payload["claims"][0]["baselines"].append("lanam")
+    manifest.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+    completed = _run_gate(manifest)
+
+    assert completed.returncode == 0, completed.stderr
+    assert "uci-benchmark-panel: ready" in completed.stdout
+
+
 def test_readme_distinguishes_publication_gate_from_smoke_tests() -> None:
     """The benchmark docs explain when to use the publication gate."""
     readme = Path("experiments/uci_benchmark/README.md").read_text(encoding="utf-8")

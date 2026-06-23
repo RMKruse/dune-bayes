@@ -108,6 +108,20 @@ def _metric_path(result: Path, dataset: str, baseline: str, metric: str) -> Path
     return metric_dir / f"{metric}.csv"
 
 
+def _is_excluded(
+    exclusions: set[tuple[str, str, str]],
+    dataset: str,
+    baseline: str,
+    metric: str,
+) -> bool:
+    """Return whether one metric or its whole comparator is excluded."""
+    return (dataset, baseline, metric) in exclusions or (
+        dataset,
+        baseline,
+        "*",
+    ) in exclusions
+
+
 def _validate_claim(manifest: Path, claim: Mapping[str, Any]) -> list[_Gap]:
     """Validate one benchmark claim against promoted canonical artifacts."""
     claim_id = str(claim["id"])
@@ -148,6 +162,11 @@ def _validate_claim(manifest: Path, claim: Mapping[str, Any]) -> list[_Gap]:
                 )
             )
         for baseline in baselines:
+            if metrics and all(
+                _is_excluded(exclusions, dataset_name, baseline, metric)
+                for metric in metrics
+            ):
+                continue
             if (dataset_name, baseline) not in comparison:
                 gaps.append(
                     _Gap(
@@ -159,7 +178,7 @@ def _validate_claim(manifest: Path, claim: Mapping[str, Any]) -> list[_Gap]:
                     )
                 )
             for metric in metrics:
-                if (dataset_name, baseline, metric) in exclusions:
+                if _is_excluded(exclusions, dataset_name, baseline, metric):
                     continue
                 path = _metric_path(result, dataset_name, baseline, metric)
                 if not path.is_file():

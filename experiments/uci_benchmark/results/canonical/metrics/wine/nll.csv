@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+wine,normal,dune_bayes,320,1.1724923018412485

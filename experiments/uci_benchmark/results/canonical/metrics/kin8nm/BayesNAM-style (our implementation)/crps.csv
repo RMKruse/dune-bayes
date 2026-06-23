@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+kin8nm,normal_homoscedastic,BayesNAM-style (our implementation),1638,0.11861168729932826

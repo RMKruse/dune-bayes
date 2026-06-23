@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+wine,normal_homoscedastic,BayesNAM-style (our implementation),320,0.38398116339293714

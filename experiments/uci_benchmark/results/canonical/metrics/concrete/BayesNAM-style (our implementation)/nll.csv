@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+concrete,normal_homoscedastic,BayesNAM-style (our implementation),206,22.586756055019194

@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+protein,normal_homoscedastic,BayesNAM-style (our implementation),9146,8.15410220787909

@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+naval,beta,dune_bayes,2387,-2.8782731900725596

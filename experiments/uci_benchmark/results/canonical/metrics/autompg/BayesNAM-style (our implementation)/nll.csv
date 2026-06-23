@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+autompg,normal_homoscedastic,BayesNAM-style (our implementation),78,7.023231114547582

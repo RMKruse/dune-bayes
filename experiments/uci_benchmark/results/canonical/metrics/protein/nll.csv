@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+protein,normal,dune_bayes,9146,3.1986395210659757

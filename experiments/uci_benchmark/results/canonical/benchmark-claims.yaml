@@ -1,0 +1,103 @@
+claims:
+  - id: benchmark-comparator-panel
+    result: .
+    evidence: full
+    datasets:
+      - {name: autompg, family: normal}
+      - {name: concrete, family: normal}
+      - {name: energy, family: normal}
+      - {name: kin8nm, family: normal}
+      - {name: naval, family: beta}
+      - {name: power, family: normal}
+      - {name: protein, family: normal}
+      - {name: wine, family: normal}
+      - {name: yacht, family: normal}
+      - {name: bike, family: negative_binomial}
+    baselines:
+      - dune_bayes
+      - BayesNAM-style (our implementation)
+      - plain_mlp
+      - deep_ensemble
+      - nampy_namlss
+      - lanam
+      - bamlss_reference
+    metrics: [nll, crps, calibration]
+    exclusions:
+      - &nampy_autompg
+        dataset: autompg
+        baseline: nampy_namlss
+        metric: "*"
+        reason: >
+          Optional TensorFlow/NAMpy comparator environment is not part of the
+          full canonical run; the live process boundary is covered by the
+          promoted namlss-smoke tracer.
+      - <<: *nampy_autompg
+        dataset: concrete
+      - <<: *nampy_autompg
+        dataset: energy
+      - <<: *nampy_autompg
+        dataset: kin8nm
+      - <<: *nampy_autompg
+        dataset: naval
+      - <<: *nampy_autompg
+        dataset: power
+      - <<: *nampy_autompg
+        dataset: protein
+      - <<: *nampy_autompg
+        dataset: wine
+      - <<: *nampy_autompg
+        dataset: yacht
+      - <<: *nampy_autompg
+        dataset: bike
+      - &lanam_autompg
+        dataset: autompg
+        baseline: lanam
+        metric: "*"
+        reason: >
+          Optional LA-NAM environment is isolated from the package stack and was
+          not enabled for this canonical run; installation remains documented
+          through requirements-lanam.txt.
+      - <<: *lanam_autompg
+        dataset: concrete
+      - <<: *lanam_autompg
+        dataset: energy
+      - <<: *lanam_autompg
+        dataset: kin8nm
+      - <<: *lanam_autompg
+        dataset: naval
+      - <<: *lanam_autompg
+        dataset: power
+      - <<: *lanam_autompg
+        dataset: protein
+      - <<: *lanam_autompg
+        dataset: wine
+      - <<: *lanam_autompg
+        dataset: yacht
+      - <<: *lanam_autompg
+        dataset: bike
+      - &bamlss_autompg
+        dataset: autompg
+        baseline: bamlss_reference
+        metric: "*"
+        reason: >
+          Maintainer-produced BAMLSS fixtures are not available for the full
+          ten-dataset panel; the fixture scoring seam is covered by the
+          committed Auto MPG fixture and smoke-scale tests.
+      - <<: *bamlss_autompg
+        dataset: concrete
+      - <<: *bamlss_autompg
+        dataset: energy
+      - <<: *bamlss_autompg
+        dataset: kin8nm
+      - <<: *bamlss_autompg
+        dataset: naval
+      - <<: *bamlss_autompg
+        dataset: power
+      - <<: *bamlss_autompg
+        dataset: protein
+      - <<: *bamlss_autompg
+        dataset: wine
+      - <<: *bamlss_autompg
+        dataset: yacht
+      - <<: *bamlss_autompg
+        dataset: bike

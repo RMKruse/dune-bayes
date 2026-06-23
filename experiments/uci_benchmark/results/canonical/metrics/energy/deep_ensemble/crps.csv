@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+energy,gaussian_residual_mixture,deep_ensemble,154,1.0918135973784264

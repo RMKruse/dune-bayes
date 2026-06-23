@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+protein,gaussian_residual,plain_mlp,9146,2.9777084011075377

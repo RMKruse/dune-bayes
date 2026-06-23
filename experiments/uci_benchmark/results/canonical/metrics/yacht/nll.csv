@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+yacht,normal,dune_bayes,62,8.466606946463491

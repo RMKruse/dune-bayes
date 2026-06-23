@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+concrete,normal,dune_bayes,206,11.91664430720063

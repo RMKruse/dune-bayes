@@ -65,6 +65,7 @@ uv run --extra experiments python -m experiments.publication.evidence \
 
 The command is intentionally a publication gate over promoted `results/`
 artifacts, not a runner for new experiments. Scratch output under `runs/` must be
-inspected and promoted first. At the moment the benchmark/comparator claim is
-listed but still points at a smoke artifact, so the gate reports `NOT READY`
-until a full canonical UCI/comparator panel is promoted.
+inspected and promoted first. The benchmark/comparator claim now points at the
+promoted full UCI panel in `uci_benchmark/results/canonical`; the companion
+`benchmark-claims.yaml` records which comparators were scored and which optional
+external baselines were explicitly excluded.

@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+bike,gaussian_residual,plain_mlp,3476,6.429072046170163

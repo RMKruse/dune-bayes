@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+yacht,normal_homoscedastic,BayesNAM-style (our implementation),62,6.630613579136016

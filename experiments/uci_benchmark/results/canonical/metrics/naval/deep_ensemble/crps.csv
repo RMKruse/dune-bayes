@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+naval,gaussian_residual_mixture,deep_ensemble,2387,0.002819931976106508

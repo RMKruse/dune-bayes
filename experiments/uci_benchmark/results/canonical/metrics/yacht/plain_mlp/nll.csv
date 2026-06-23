@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+yacht,gaussian_residual,plain_mlp,62,1.7326029865972457

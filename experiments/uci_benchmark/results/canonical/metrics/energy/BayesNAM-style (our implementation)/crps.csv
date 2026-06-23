@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+energy,normal_homoscedastic,BayesNAM-style (our implementation),154,1.6319476087546823

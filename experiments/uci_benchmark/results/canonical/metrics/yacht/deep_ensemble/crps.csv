@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+yacht,gaussian_residual_mixture,deep_ensemble,62,0.7215490585679057

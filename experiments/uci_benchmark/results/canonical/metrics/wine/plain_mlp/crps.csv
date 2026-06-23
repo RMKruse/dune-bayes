@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+wine,gaussian_residual,plain_mlp,320,0.35690371892361455
