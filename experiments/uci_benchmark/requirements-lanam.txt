@@ -1,0 +1,11 @@
+# LA-NAM external runner environment (ADR-0008, GitHub #105).
+# Upstream fortuinlab/LA-NAM is MIT-licensed; pin the exact reviewed commit.
+# Keep this outside pyproject extras: LA-NAM requires NumPy 1.x, while
+# dune-bayes comparison uses ArviZ's NumPy-2/DataTree stack.
+laplace-skorch @ git+https://github.com/fortuinlab/LA-NAM.git@d6748ebcb1dd5b5c15ca3120c4dcc19667ead111
+
+# LA-NAM/laplace-torch 0.2.x imports the curvlinops 2.x private layout.
+curvlinops-for-pytorch>=2.0,<3
+
+# skorch 0.15 in upstream LA-NAM predates sklearn's 1.6 tag API.
+scikit-learn>=1.5,<1.6

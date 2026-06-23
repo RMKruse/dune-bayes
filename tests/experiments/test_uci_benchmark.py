@@ -257,6 +257,75 @@ np.savez(
     assert np.isfinite(float(namlss["calibration_error"]))
 
 
+def test_configured_lanam_runner_is_scored_as_mean_only_baseline(
+    tmp_path: Path,
+) -> None:
+    """LA-NAM enters through the shared seam and labels its mean-only scope."""
+    fake_runner = tmp_path / "fake_lanam_runner.py"
+    fake_runner.write_text(
+        """
+from __future__ import annotations
+
+import argparse
+import numpy as np
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--input", required=True)
+parser.add_argument("--output", required=True)
+parser.add_argument("--family", required=True)
+parser.add_argument("--draws", type=int, required=True)
+parser.add_argument("--predictive-samples", type=int, required=True)
+parser.add_argument("--seed", type=int, required=True)
+parser.add_argument("--epochs", type=int, required=True)
+parser.add_argument("--learning-rate", type=float, required=True)
+parser.add_argument("--batch-size", type=int, required=True)
+args = parser.parse_args()
+
+payload = np.load(args.input)
+y = payload["test_target"].astype(float)
+rng = np.random.default_rng(args.seed)
+samples = np.tile(y, (args.predictive_samples, 1)) + rng.normal(
+    scale=1e-6, size=(args.predictive_samples, y.shape[0])
+)
+np.savez(
+    args.output,
+    samples=samples,
+    log_density=np.zeros(y.shape[0], dtype=float),
+    cdf=np.linspace(0.05, 0.95, y.shape[0], dtype=float),
+)
+""",
+        encoding="utf-8",
+    )
+    python_shim = tmp_path / "python-with-uv"
+    python_shim.write_text('#!/bin/sh\nexec uv run python "$@"\n', encoding="utf-8")
+    python_shim.chmod(0o755)
+    config_path = _smoke_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["baselines"]["lanam"] = {
+        "enabled": True,
+        "python": str(python_shim),
+        "runner": str(fake_runner),
+        "batch_size": 512,
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    completed = _run_smoke(config_path)
+    assert completed.returncode == 0, completed.stderr
+
+    comparison = _read_rows(
+        tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics" / "comparison.csv"
+    )
+    rows = {row["model"]: row for row in comparison}
+    lanam = rows["lanam"]
+    assert lanam["dataset"] == rows["dune_bayes"]["dataset"] == "autompg"
+    assert lanam["n_test"] == rows["dune_bayes"]["n_test"]
+    assert lanam["uncertainty_scope"] == "mean_only_laplace_location"
+    assert np.isfinite(float(lanam["mean_nll"]))
+    assert np.isfinite(float(lanam["mean_crps"]))
+    assert np.isfinite(float(lanam["calibration_error"]))
+
+
 def test_readme_documents_the_common_predictive_adapter() -> None:
     """Future baselines can implement the scoring seam without reading its code."""
     readme = Path("experiments/uci_benchmark/README.md").read_text(encoding="utf-8")
@@ -271,6 +340,33 @@ def test_readme_documents_the_common_predictive_adapter() -> None:
     assert "nampy_namlss" in readme
     assert "separate TensorFlow" in readme
     assert "namlss-paper-code" in readme
+
+
+def test_lanam_route_is_documented_and_pinned_to_mit_git_dependency() -> None:
+    """The HITL license decision selected the pinned dependency route."""
+    readme = Path("experiments/uci_benchmark/README.md").read_text(encoding="utf-8")
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    project = pyproject["project"]
+    lanam_requirements = Path(
+        "experiments/uci_benchmark/requirements-lanam.txt"
+    ).read_text(encoding="utf-8")
+
+    assert "MIT" in readme
+    assert "fortuinlab/LA-NAM" in readme
+    assert "d6748ebcb1dd5b5c15ca3120c4dcc19667ead111" in readme
+    assert config["baselines"]["lanam"]["enabled"] is False
+    assert config["baselines"]["lanam"]["runner"] == "lanam_runner.py"
+    assert "lanam" not in project["optional-dependencies"]
+    assert "requirements-lanam.txt" in readme
+    assert "laplace-skorch @ git+https://github.com/fortuinlab/LA-NAM.git" in (
+        lanam_requirements
+    )
+    assert "@d6748ebcb1dd5b5c15ca3120c4dcc19667ead111" in lanam_requirements
+    assert "curvlinops-for-pytorch>=2.0,<3" in lanam_requirements
+    assert "scikit-learn>=1.5,<1.6" in lanam_requirements
 
 
 def test_nampy_runner_help_is_available_without_tensorflow_import() -> None:
@@ -289,6 +385,24 @@ def test_nampy_runner_help_is_available_without_tensorflow_import() -> None:
     assert completed.returncode == 0
     assert "--paper-code-dir" in completed.stdout
     assert "--family" in completed.stdout
+
+
+def test_lanam_runner_help_is_available_without_optional_dependency() -> None:
+    """The LA-NAM runner keeps laplace-skorch imports behind execution."""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "experiments/uci_benchmark/lanam_runner.py",
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert "--family" in completed.stdout
+    assert "--predictive-samples" in completed.stdout
 
 
 def test_results_include_a_promoted_three_model_smoke_comparison() -> None:

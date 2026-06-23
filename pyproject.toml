@@ -6,12 +6,12 @@ build-backend = "hatchling.build"
 name = "dune-bayes"
 version = "0.1.0.dev0"
 description = "DUNE (Distributional Uncertainty in Neural-additive Estimation) — Bayesian additive models for location, scale, and shape with mean-field VI"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "torch>=2.12",
-    "numpy",
+    "numpy>=2",
     "pandas>=2.2",
-    "arviz",
+    "arviz>=1.1",
     # Explicit, not transitive (issue #93): family CDFs for PIT calibration
     # go through scipy.stats (torch's StudentT has no .cdf).
     "scipy>=1.14",
@@ -22,6 +22,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pyyaml>=6.0",
     "ruff",
     "mypy",
     "pandas-stubs",

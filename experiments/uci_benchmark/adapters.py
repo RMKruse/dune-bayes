@@ -50,6 +50,7 @@ class BenchmarkAdapter(Protocol):
     """Small interface shared by every benchmark model."""
 
     name: str
+    uncertainty_scope: str
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fit the model on the persisted training partition."""
@@ -70,6 +71,7 @@ class DuneBayesAdapter:
     """Expose ``BayesianNAMLSS`` through the benchmark prediction contract."""
 
     name = "dune_bayes"
+    uncertainty_scope = "distributional_parameter_bands"
 
     def __init__(
         self,
@@ -160,6 +162,7 @@ class PlainMLPAdapter:
     """Point-estimate MLP with a fitted homoscedastic Gaussian residual."""
 
     name = "plain_mlp"
+    uncertainty_scope = "predictive_only"
 
     def __init__(
         self,
@@ -239,6 +242,7 @@ class NampyNamlssAdapter:
     """
 
     name = "nampy_namlss"
+    uncertainty_scope = "deterministic_distributional"
 
     def __init__(
         self,
@@ -363,10 +367,141 @@ class NampyNamlssAdapter:
         return PredictiveResult(samples=samples, log_density=log_density, cdf=cdf)
 
 
+class LANAMAdapter:
+    """External LA-NAM comparator behind the common scoring contract.
+
+    LA-NAM is the closest mean-only Bayesian NAM baseline (ADR-0008,
+    GitHub #105).  It is invoked in a separate process so the optional
+    pinned git dependency remains isolated in the experiments tier.
+    """
+
+    name = "lanam"
+    uncertainty_scope = "mean_only_laplace_location"
+
+    def __init__(
+        self,
+        *,
+        python: str,
+        runner: Path,
+        family: str,
+        epochs: int,
+        learning_rate: float,
+        batch_size: int = 512,
+    ) -> None:
+        self._python = python
+        self._runner = runner
+        self._family = family
+        self._epochs = epochs
+        self._learning_rate = learning_rate
+        self._batch_size = batch_size
+        self._train_matrix: torch.Tensor | None = None
+        self._train_target: torch.Tensor | None = None
+        self._smoke = False
+
+    def fit(self, train_data: DataModule, *, smoke: bool) -> None:
+        """Capture the shared training partition for the external process."""
+        self._smoke = smoke
+        self._train_matrix = _feature_matrix(train_data.features)
+        self._train_target = train_data.target.to(torch.float32)
+
+    def predict(
+        self,
+        features: Mapping[str, torch.Tensor],
+        target: torch.Tensor,
+        *,
+        draws: int,
+        predictive_samples: int,
+        seed: int,
+    ) -> PredictiveResult:
+        """Invoke the configured LA-NAM runner and validate its predictions."""
+        if self._train_matrix is None or self._train_target is None:
+            raise RuntimeError("fit() must be called before predict().")
+
+        test_matrix = _feature_matrix(features)
+        with tempfile.TemporaryDirectory(prefix="dune-bayes-lanam-") as tmp:
+            tmp_path = Path(tmp)
+            input_path = tmp_path / "input.npz"
+            output_path = tmp_path / "prediction.npz"
+            np.savez(
+                input_path,
+                train_features=self._train_matrix.detach().cpu().numpy(),
+                train_target=self._train_target.detach().cpu().numpy(),
+                test_features=test_matrix.detach().cpu().numpy(),
+                test_target=target.detach().cpu().numpy(),
+            )
+            completed = subprocess.run(
+                [
+                    self._python,
+                    str(self._runner),
+                    "--input",
+                    str(input_path),
+                    "--output",
+                    str(output_path),
+                    "--family",
+                    self._family,
+                    "--draws",
+                    str(draws),
+                    "--predictive-samples",
+                    str(predictive_samples),
+                    "--seed",
+                    str(seed),
+                    "--epochs",
+                    str(1 if self._smoke else self._epochs),
+                    "--learning-rate",
+                    str(self._learning_rate),
+                    "--batch-size",
+                    str(self._batch_size),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    "LA-NAM runner failed with exit code "
+                    f"{completed.returncode}.\nSTDOUT:\n{completed.stdout}\n"
+                    f"STDERR:\n{completed.stderr}"
+                )
+            if not output_path.exists():
+                raise RuntimeError(
+                    f"LA-NAM runner completed but did not write {output_path}."
+                )
+            with np.load(output_path) as output:
+                samples_array = output["samples"]
+                log_density_array = output["log_density"]
+                cdf_array = output["cdf"]
+
+        samples = torch.tensor(samples_array, dtype=torch.float32)
+        log_density = torch.tensor(log_density_array, dtype=torch.float64)
+        cdf = torch.tensor(cdf_array, dtype=torch.float64)
+        n_obs = int(target.shape[0])
+        if samples.shape != (predictive_samples, n_obs):
+            raise RuntimeError(
+                "LA-NAM runner returned samples with shape "
+                f"{tuple(samples.shape)}, expected {(predictive_samples, n_obs)}."
+            )
+        if log_density.shape != (n_obs,):
+            raise RuntimeError(
+                "LA-NAM runner returned log_density with shape "
+                f"{tuple(log_density.shape)}, expected {(n_obs,)}."
+            )
+        if cdf.shape != (n_obs,):
+            raise RuntimeError(
+                "LA-NAM runner returned cdf with shape "
+                f"{tuple(cdf.shape)}, expected {(n_obs,)}."
+            )
+        if not bool(torch.isfinite(log_density).all()):
+            raise RuntimeError("LA-NAM runner returned non-finite log_density.")
+        if not bool(((cdf >= 0.0) & (cdf <= 1.0)).all()):
+            raise RuntimeError("LA-NAM runner returned CDF values outside [0, 1].")
+        return PredictiveResult(samples=samples, log_density=log_density, cdf=cdf)
+
+
 class DeepEnsembleAdapter:
     """Uniform mixture of independently initialized Gaussian-residual MLPs."""
 
     name = "deep_ensemble"
+    uncertainty_scope = "predictive_only"
 
     def __init__(
         self,

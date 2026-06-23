@@ -72,6 +72,11 @@ baselines:
     runner: nampy_namlss_runner.py
     paper_code_dir: ../../namlss-paper-code
     batch_size: 512
+  lanam:
+    enabled: false
+    python: ../../.venv-lanam/bin/python
+    runner: lanam_runner.py
+    batch_size: 512
 draws: 500
 predictive_samples: 500
 calibration_bins: 10

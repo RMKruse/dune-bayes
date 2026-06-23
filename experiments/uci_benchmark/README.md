@@ -52,13 +52,14 @@ calibration. The runner owns all scoring and passes every adapter the same
 training `DataModule`, held-out feature tensors, targets, and persisted split.
 This keeps model-specific evaluation code out of comparison tables.
 
-The `dune_bayes`, `plain_mlp`, `deep_ensemble`, and optional `nampy_namlss`
-adapters prove the seam end-to-end. The latter two built-in PyTorch baselines
-are conventional sanity floors: each uses a homoscedastic Gaussian residual,
-and the ensemble mixes independently initialized MLP predictives. They do not
-provide dune-bayes's distributional separation of aleatoric family uncertainty
-from epistemic uncertainty on shape functions. Per-baseline tables live below
-`metrics/<dataset>/<model>/`; `metrics/comparison.csv` is the combined panel.
+The `dune_bayes`, `plain_mlp`, `deep_ensemble`, optional `nampy_namlss`, and
+optional `lanam` adapters prove the seam end-to-end. The built-in PyTorch
+sanity floors are `plain_mlp` and `deep_ensemble`: each uses a homoscedastic
+Gaussian residual, and the ensemble mixes independently initialized MLP
+predictives. They do not provide dune-bayes's distributional separation of
+aleatoric family uncertainty from epistemic uncertainty on shape functions.
+Per-baseline tables live below `metrics/<dataset>/<model>/`;
+`metrics/comparison.csv` is the combined panel.
 
 ## Live NAMLSS comparator
 
@@ -86,3 +87,30 @@ non-Normal comparator runs fail explicitly until matching original configs are
 available. Published paper numbers are not used as comparison targets; once the
 original configs are pinned, sanity-check notes belong beside the promoted
 `results/` run.
+
+## LA-NAM comparator
+
+The LA-NAM route for #105 is the pinned git dependency route, not fixtures:
+`fortuinlab/LA-NAM` is MIT-licensed, so
+`experiments/uci_benchmark/requirements-lanam.txt` pins `laplace-skorch` at
+commit `d6748ebcb1dd5b5c15ca3120c4dcc19667ead111` (`v0.2.0`). This dependency
+file is separate from `pyproject.toml` because upstream LA-NAM requires NumPy
+1.x while the package comparison stack uses ArviZ's NumPy-2/DataTree path. Keep
+it disabled in the default config until intentionally running the optional
+baseline:
+
+```yaml
+baselines:
+  lanam:
+    enabled: true
+    python: ../../.venv-lanam/bin/python
+    runner: lanam_runner.py
+```
+
+`lanam_runner.py` fits the authors' `LaplaceAdditiveNetRegressor` in a separate
+process and returns per-observation Gaussian predictive samples, log-density,
+and CDF for the common scorer. Its comparison row is labeled
+`mean_only_laplace_location`: LA-NAM supplies Bayesian uncertainty over the
+location/mean additive predictor, but it does not expose per-distribution-
+parameter bands for scale or shape. Those parameter-band and variance-split
+tables remain `dune_bayes`-only artifacts.
