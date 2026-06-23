@@ -52,14 +52,20 @@ calibration. The runner owns all scoring and passes every adapter the same
 training `DataModule`, held-out feature tensors, targets, and persisted split.
 This keeps model-specific evaluation code out of comparison tables.
 
-The `dune_bayes`, `plain_mlp`, `deep_ensemble`, optional `nampy_namlss`, and
-optional `lanam` adapters prove the seam end-to-end. The built-in PyTorch
-sanity floors are `plain_mlp` and `deep_ensemble`: each uses a homoscedastic
-Gaussian residual, and the ensemble mixes independently initialized MLP
-predictives. They do not provide dune-bayes's distributional separation of
-aleatoric family uncertainty from epistemic uncertainty on shape functions.
-Per-baseline tables live below `metrics/<dataset>/<model>/`;
-`metrics/comparison.csv` is the combined panel.
+The `dune_bayes`, `BayesNAM-style (our implementation)`, `plain_mlp`,
+`deep_ensemble`, optional `nampy_namlss`, and optional `lanam` adapters prove
+the seam end-to-end. `BayesNAM-style (our implementation)` is a labeled
+degenerate dune-bayes config: Bayesian shape functions contribute only to the
+Normal location parameter, while a point intercept learns one homoscedastic
+scale. The built-in PyTorch sanity floors are `plain_mlp` and `deep_ensemble`:
+each uses a homoscedastic Gaussian residual, and the ensemble mixes
+independently initialized MLP predictives. Those baselines do not provide
+dune-bayes's distributional separation of aleatoric family uncertainty from
+epistemic uncertainty on shape functions. Per-baseline tables live below
+`metrics/<dataset>/<model>/`; `metrics/comparison.csv` is the combined panel.
+When the BayesNAM-style baseline is enabled, the run also writes
+`figures/<dataset>/bayesnam_style_band_contrast.pdf`, contrasting its mean-only
+epistemic bands with dune-bayes per-parameter bands.
 
 ## Live NAMLSS comparator
 

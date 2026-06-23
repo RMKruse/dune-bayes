@@ -133,6 +133,18 @@ class DuneBayesAdapter:
         )
 
 
+class BayesNamStyleAdapter(DuneBayesAdapter):
+    """Labeled mean-only variational NAM baseline (ADR-0008, GitHub #106).
+
+    This is deliberately a degenerate dune-bayes configuration rather than a
+    separate package implementation: Bayesian location shape functions plus a
+    point intercept that learns one homoscedastic Normal scale.
+    """
+
+    name = "BayesNAM-style (our implementation)"
+    uncertainty_scope = "mean_only_variational_location"
+
+
 class _PlainMLP(torch.nn.Module):
     """Minimal point-estimate network used only by the experiment harness."""
 
@@ -150,7 +162,8 @@ class _PlainMLP(torch.nn.Module):
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         """Return one point prediction per observation."""
-        return self.network(features).squeeze(-1)
+        out: torch.Tensor = self.network(features)
+        return out.squeeze(-1)
 
 
 def _feature_matrix(features: Mapping[str, torch.Tensor]) -> torch.Tensor:
@@ -205,7 +218,8 @@ class PlainMLPAdapter:
         """Return response-scale means from a fitted network."""
         if self._model is None:
             raise RuntimeError("fit() must be called before predict().")
-        return self._model(features) * self._target_scale + self._target_loc
+        mean: torch.Tensor = self._model(features)
+        return mean * self._target_scale + self._target_loc
 
     def predict(
         self,

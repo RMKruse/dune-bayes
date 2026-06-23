@@ -165,10 +165,10 @@ def test_plain_mlp_is_scored_on_the_same_held_out_observations(
     assert np.isfinite(float(plain["calibration_error"]))
 
 
-def test_deep_ensemble_completes_the_three_model_sanity_panel(
+def test_deep_ensemble_completes_the_built_in_sanity_panel(
     tmp_path: Path,
 ) -> None:
-    """Independent MLP members contribute one mixture-predictive comparison row."""
+    """Independent MLP members contribute beside the built-in baselines."""
     completed = _run_smoke(_smoke_config(tmp_path))
     assert completed.returncode == 0, completed.stderr
 
@@ -176,6 +176,7 @@ def test_deep_ensemble_completes_the_three_model_sanity_panel(
         tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics" / "comparison.csv"
     )
     assert {row["model"] for row in comparison} == {
+        "BayesNAM-style (our implementation)",
         "dune_bayes",
         "plain_mlp",
         "deep_ensemble",
@@ -186,6 +187,48 @@ def test_deep_ensemble_completes_the_three_model_sanity_panel(
     assert np.isfinite(float(ensemble["mean_nll"]))
     assert np.isfinite(float(ensemble["mean_crps"]))
     assert np.isfinite(float(ensemble["calibration_error"]))
+
+
+def test_bayesnam_style_baseline_is_labeled_and_scored_on_shared_split(
+    tmp_path: Path,
+) -> None:
+    """The degenerate first-party baseline is explicit in the shared table."""
+    completed = _run_smoke(_smoke_config(tmp_path))
+    assert completed.returncode == 0, completed.stderr
+
+    metrics = tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics"
+    comparison = _read_rows(metrics / "comparison.csv")
+    rows = {row["model"]: row for row in comparison}
+    label = "BayesNAM-style (our implementation)"
+    baseline = rows[label]
+    dune = rows["dune_bayes"]
+
+    assert baseline["dataset"] == dune["dataset"] == "autompg"
+    assert baseline["n_test"] == dune["n_test"]
+    assert baseline["uncertainty_scope"] == "mean_only_variational_location"
+    assert np.isfinite(float(baseline["mean_nll"]))
+    assert np.isfinite(float(baseline["mean_crps"]))
+    assert np.isfinite(float(baseline["calibration_error"]))
+    nll = _read_rows(metrics / "autompg" / label / "nll.csv")
+    assert nll[0]["model"] == label
+
+
+def test_bayesnam_style_outputs_band_contrast_figure(tmp_path: Path) -> None:
+    """The promoted comparison includes the mean-only vs per-parameter contrast."""
+    completed = _run_smoke(_smoke_config(tmp_path))
+    assert completed.returncode == 0, completed.stderr
+
+    figure = (
+        tmp_path
+        / "runs"
+        / "uci_benchmark"
+        / "seed-102"
+        / "figures"
+        / "autompg"
+        / "bayesnam_style_band_contrast.pdf"
+    )
+    assert figure.is_file()
+    assert figure.stat().st_size > 1_000
 
 
 def test_configured_nampy_namlss_runner_is_scored_beside_dune_bayes(
@@ -337,6 +380,9 @@ def test_readme_documents_the_common_predictive_adapter() -> None:
     assert "cdf" in readme
     assert "plain_mlp" in readme
     assert "deep_ensemble" in readme
+    assert "BayesNAM-style (our implementation)" in readme
+    assert "location parameter" in readme
+    assert "bayesnam_style_band_contrast.pdf" in readme
     assert "nampy_namlss" in readme
     assert "separate TensorFlow" in readme
     assert "namlss-paper-code" in readme
@@ -405,18 +451,25 @@ def test_lanam_runner_help_is_available_without_optional_dependency() -> None:
     assert "--predictive-samples" in completed.stdout
 
 
-def test_results_include_a_promoted_three_model_smoke_comparison() -> None:
-    """The sanity-floor result is reviewable without rerunning the experiment."""
-    rows = _read_rows(
-        Path("experiments/uci_benchmark/results/smoke/metrics/comparison.csv")
-    )
+def test_results_include_a_promoted_bayesnam_style_smoke_comparison() -> None:
+    """The degenerate baseline result is reviewable without rerunning."""
+    result_dir = Path("experiments/uci_benchmark/results/smoke")
+    rows = _read_rows(result_dir / "metrics" / "comparison.csv")
 
     assert {row["model"] for row in rows} == {
+        "BayesNAM-style (our implementation)",
         "dune_bayes",
         "plain_mlp",
         "deep_ensemble",
     }
     assert all(row["dataset"] == "autompg" for row in rows)
+    baseline = next(
+        row for row in rows if row["model"] == "BayesNAM-style (our implementation)"
+    )
+    assert baseline["uncertainty_scope"] == "mean_only_variational_location"
+    assert (
+        result_dir / "figures" / "autompg" / "bayesnam_style_band_contrast.pdf"
+    ).is_file()
 
 
 def test_results_include_a_promoted_live_nampy_smoke_comparison() -> None:
@@ -458,6 +511,19 @@ def test_panel_config_declares_standard_datasets_and_response_families() -> None
     assert families["bike"] == "negative_binomial"
     assert families["naval"] == "beta"
     assert set(families.values()) == {"normal", "negative_binomial", "beta"}
+
+
+def test_panel_config_declares_bayesnam_style_baseline() -> None:
+    """The degenerate first-party baseline is enabled by plain config."""
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+
+    baseline = config["baselines"]["bayesnam_style"]
+    assert baseline["enabled"] is True
+    assert baseline["label"] == "BayesNAM-style (our implementation)"
+    assert baseline["family"] == "normal_homoscedastic"
+    assert baseline["effect"] == "location_only"
 
 
 def test_panel_config_pins_every_remote_dataset_source() -> None:

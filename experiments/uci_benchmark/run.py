@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -24,6 +25,7 @@ run_experiment = _harness.run_experiment
 
 from dune_bayes.data import DataModule  # noqa: E402
 from dune_bayes.families import (  # noqa: E402
+    BaseFamily,
     BetaFamily,
     NegativeBinomialFamily,
     NormalFamily,
@@ -36,6 +38,7 @@ from dune_bayes.model import BayesianNAMLSS  # noqa: E402
 from dune_bayes.shapes import BayesianMLP  # noqa: E402
 from dune_bayes.utils import EPS  # noqa: E402
 from experiments.uci_benchmark.adapters import (  # noqa: E402
+    BayesNamStyleAdapter,
     BenchmarkAdapter,
     DeepEnsembleAdapter,
     DuneBayesAdapter,
@@ -46,6 +49,25 @@ from experiments.uci_benchmark.adapters import (  # noqa: E402
 )
 
 _EXPERIMENT_DIR = Path(__file__).resolve().parent
+
+
+class _LocationOnlyShape(nn.Module):
+    """Lift a one-parameter Bayesian feature effect into a Normal parameter vector."""
+
+    def __init__(self, loc_net: nn.Module, param_count: int) -> None:
+        super().__init__()
+        self.loc_net = loc_net
+        self.param_count = int(param_count)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Return stochastic location contributions and zero scale contributions."""
+        loc = self.loc_net(x)
+        zeros = torch.zeros(
+            (*loc.shape[:-1], self.param_count - 1),
+            dtype=loc.dtype,
+            device=loc.device,
+        )
+        return torch.cat([loc, zeros], dim=-1)
 
 
 def _data_path(config: Mapping[str, Any], key: str) -> Path:
@@ -182,6 +204,56 @@ def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
         writer.writerows(rows)
 
 
+def _build_dune_bayes_model(
+    train_data: DataModule,
+    family: BaseFamily,
+    config: Mapping[str, Any],
+    *,
+    location_only: bool = False,
+) -> BayesianNAMLSS:
+    """Build a configured first-party Bayesian additive model."""
+    hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
+    prior_scale = float(config["architecture"]["prior_scale"])
+    activation = str(config["architecture"]["activation"])
+    if location_only:
+        formula = {
+            feature: _LocationOnlyShape(
+                BayesianMLP(
+                    1,
+                    1,
+                    hidden_dims=hidden_dims,
+                    prior_scale=prior_scale,
+                    kl_divisor=train_data.n_obs,
+                    activation=activation,
+                ),
+                family.param_count,
+            )
+            for feature in train_data.features
+        }
+        return BayesianNAMLSS(
+            formula=formula,
+            family=family,
+            n_obs=train_data.n_obs,
+            intercept_mode="point",
+        )
+    formula = {
+        feature: BayesianMLP(
+            1,
+            family.param_count,
+            hidden_dims=hidden_dims,
+            prior_scale=prior_scale,
+            kl_divisor=train_data.n_obs,
+            activation=activation,
+        )
+        for feature in train_data.features
+    }
+    return BayesianNAMLSS(
+        formula=formula,
+        family=family,
+        n_obs=train_data.n_obs,
+    )
+
+
 def _score_dataset(
     config: Mapping[str, Any],
     dataset: Mapping[str, Any],
@@ -209,22 +281,7 @@ def _score_dataset(
     else:
         family = NormalFamily()
     hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
-    formula = {
-        feature: BayesianMLP(
-            1,
-            family.param_count,
-            hidden_dims=hidden_dims,
-            prior_scale=float(config["architecture"]["prior_scale"]),
-            kl_divisor=train_data.n_obs,
-            activation=str(config["architecture"]["activation"]),
-        )
-        for feature in train_data.features
-    }
-    model = BayesianNAMLSS(
-        formula=formula,
-        family=family,
-        n_obs=train_data.n_obs,
-    )
+    model = _build_dune_bayes_model(train_data, family, config)
     draws_count = min(int(config["draws"]), 16) if smoke else int(config["draws"])
     predictive_samples = (
         min(int(config["predictive_samples"]), 32)
@@ -263,6 +320,55 @@ def _score_dataset(
         family=family_name,
         metric_dir=paths.metrics / name,
     )
+    bayesnam_config = config.get("baselines", {}).get("bayesnam_style", {})
+    if bool(bayesnam_config.get("enabled", False)):
+        if str(bayesnam_config["label"]) != BayesNamStyleAdapter.name:
+            raise ValueError("BayesNAM-style baseline label must match issue #106.")
+        if str(bayesnam_config["family"]) != "normal_homoscedastic":
+            raise ValueError("BayesNAM-style baseline must use a Normal scale.")
+        if str(bayesnam_config["effect"]) != "location_only":
+            raise ValueError("BayesNAM-style baseline must be location-only.")
+        bayesnam_family = NormalFamily()
+        bayesnam_model = _build_dune_bayes_model(
+            train_data,
+            bayesnam_family,
+            config,
+            location_only=True,
+        )
+        bayesnam: BenchmarkAdapter = BayesNamStyleAdapter(
+            bayesnam_model,
+            bayesnam_family,
+            epochs=int(config["training"]["epochs"]),
+            learning_rate=float(config["training"]["learning_rate"]),
+            warmup_epochs=int(config["training"]["warmup_epochs"]),
+            randomized_pit=False,
+        )
+        bayesnam.fit(train_data, smoke=smoke)
+        bayesnam_prediction = bayesnam.predict(
+            test_features,
+            test_target,
+            draws=draws_count,
+            predictive_samples=predictive_samples,
+            seed=int(dataset["split_seed"]),
+        )
+        comparison.extend(
+            _write_scores(
+                bayesnam_prediction,
+                adapter=bayesnam,
+                target=test_target,
+                dataset=name,
+                family="normal_homoscedastic",
+                bins=int(config["calibration_bins"]),
+                metric_dir=paths.metrics / name / bayesnam.name,
+            )
+        )
+        _write_bayesnam_band_contrast(
+            prediction,
+            bayesnam_prediction,
+            dataset=name,
+            family=family_name,
+            figure_dir=paths.figures / name,
+        )
     namlss_config = config.get("baselines", {}).get("namlss", {})
     if bool(namlss_config.get("enabled", False)):
         namlss: BenchmarkAdapter = NampyNamlssAdapter(
@@ -450,6 +556,80 @@ def _write_dune_bayes_uncertainty(
     )
 
 
+def _write_bayesnam_band_contrast(
+    dune_prediction: PredictiveResult,
+    bayesnam_prediction: PredictiveResult,
+    *,
+    dataset: str,
+    family: str,
+    figure_dir: Path,
+) -> None:
+    """Draw the mean-only BayesNAM contrast against distributional dune-bayes."""
+    if dune_prediction.parameter_draws is None:
+        raise RuntimeError("dune-bayes prediction did not expose parameter draws.")
+    if bayesnam_prediction.parameter_draws is None:
+        raise RuntimeError("BayesNAM-style prediction did not expose parameter draws.")
+
+    import matplotlib.pyplot as plt
+
+    def interval(draws: torch.Tensor) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        quantiles = torch.quantile(
+            draws.to(torch.float64),
+            torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64),
+            dim=0,
+        )
+        arrays = [item.detach().cpu().numpy() for item in quantiles]
+        return arrays[0], arrays[1], arrays[2]
+
+    dune_params = _linked_parameter_draws(dune_prediction.parameter_draws, family)
+    bayesnam_params = _linked_parameter_draws(
+        bayesnam_prediction.parameter_draws, "normal"
+    )
+    dune_items = list(dune_params.items())
+    x = np.arange(int(dune_prediction.parameter_draws.shape[1]))
+    bayesnam_label = BayesNamStyleAdapter.name
+
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    fig, axes = plt.subplots(2, 1, figsize=(7.0, 5.2), sharex=True)
+    loc_lo, loc_mid, loc_hi = interval(bayesnam_params["loc"])
+    dune_lo, dune_mid, dune_hi = interval(dune_items[0][1])
+    axes[0].fill_between(x, dune_lo, dune_hi, alpha=0.22, label="dune_bayes")
+    axes[0].plot(x, dune_mid, linewidth=1.2)
+    axes[0].fill_between(
+        x,
+        loc_lo,
+        loc_hi,
+        alpha=0.22,
+        label=bayesnam_label,
+    )
+    axes[0].plot(x, loc_mid, linewidth=1.2)
+    axes[0].set(ylabel=dune_items[0][0], title=f"{dataset}: location effect bands")
+    axes[0].legend(loc="best", fontsize=8)
+
+    second_name, second_draws = dune_items[1]
+    scale_lo, scale_mid, scale_hi = interval(second_draws)
+    bayes_scale_lo, bayes_scale_mid, bayes_scale_hi = interval(bayesnam_params["scale"])
+    axes[1].fill_between(x, scale_lo, scale_hi, alpha=0.22, label="dune_bayes")
+    axes[1].plot(x, scale_mid, linewidth=1.2)
+    axes[1].fill_between(
+        x,
+        bayes_scale_lo,
+        bayes_scale_hi,
+        alpha=0.16,
+        label=bayesnam_label,
+    )
+    axes[1].plot(x, bayes_scale_mid, linewidth=1.2)
+    axes[1].set(
+        xlabel="held-out observation",
+        ylabel=second_name,
+        title="distributional parameter band vs learned homoscedastic scale",
+    )
+    axes[1].legend(loc="best", fontsize=8)
+    fig.tight_layout()
+    fig.savefig(figure_dir / "bayesnam_style_band_contrast.pdf")
+    plt.close(fig)
+
+
 def _write_scores(
     prediction: PredictiveResult,
     *,
@@ -465,7 +645,12 @@ def _write_scores(
     crps_values = crps(prediction.samples, target)
     pit_values = prediction.cdf.to(torch.float64)
 
-    summary = {"dataset": dataset, "family": family, "n_test": len(target)}
+    summary = {
+        "dataset": dataset,
+        "family": family,
+        "model": adapter.name,
+        "n_test": len(target),
+    }
     _write_csv(
         metric_dir / "nll.csv",
         [{**summary, "mean_nll": float(nll.mean())}],

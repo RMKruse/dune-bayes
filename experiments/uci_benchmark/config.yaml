@@ -65,6 +65,11 @@ training:
   learning_rate: 0.01
   warmup_epochs: 20
 baselines:
+  bayesnam_style:
+    enabled: true
+    label: BayesNAM-style (our implementation)
+    family: normal_homoscedastic
+    effect: location_only
   deep_ensemble_members: 5
   namlss:
     enabled: false
