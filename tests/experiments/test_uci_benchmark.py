@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import functools
 import http.server
+import json
 import subprocess
 import sys
 import threading
@@ -367,6 +368,96 @@ np.savez(
     assert np.isfinite(float(lanam["mean_nll"]))
     assert np.isfinite(float(lanam["mean_crps"]))
     assert np.isfinite(float(lanam["calibration_error"]))
+
+
+def test_configured_bamlss_fixture_is_scored_on_shared_split(
+    tmp_path: Path,
+) -> None:
+    """Maintainer-produced BAMLSS fixtures enter through the shared scorer."""
+    fixture_dir = tmp_path / "bamlss-fixtures"
+    dataset_dir = fixture_dir / "autompg"
+    dataset_dir.mkdir(parents=True)
+    n_test = 4
+    rows = []
+    for observation in range(n_test):
+        center = float(observation)
+        row = {
+            "dataset": "autompg",
+            "observation": observation,
+            "log_density": -0.5,
+            "cdf": 0.1 + 0.2 * observation,
+            "q05": center - 0.2,
+            "q50": center,
+            "q95": center + 0.2,
+        }
+        for draw in range(32):
+            row[f"sample_{draw + 1:04d}"] = center + draw / 1000.0
+        rows.append(row)
+    with (dataset_dir / "predictions.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    (dataset_dir / "provenance.json").write_text(
+        json.dumps(
+            {
+                "script_version": "issue-0107-test",
+                "seed": 10701,
+                "date": "2026-06-23",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config_path = _smoke_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["baselines"]["bamlss_reference"] = {
+        "enabled": True,
+        "fixture_dir": str(fixture_dir),
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    completed = _run_smoke(config_path)
+    assert completed.returncode == 0, completed.stderr
+
+    metrics = tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics"
+    rows_by_model = {
+        row["model"]: row for row in _read_rows(metrics / "comparison.csv")
+    }
+    bamlss = rows_by_model["bamlss_reference"]
+    assert bamlss["dataset"] == rows_by_model["dune_bayes"]["dataset"] == "autompg"
+    assert bamlss["n_test"] == rows_by_model["dune_bayes"]["n_test"] == str(n_test)
+    assert bamlss["uncertainty_scope"] == "distributional_bamlss_fixture"
+    assert np.isfinite(float(bamlss["mean_nll"]))
+    assert np.isfinite(float(bamlss["mean_crps"]))
+    assert np.isfinite(float(bamlss["calibration_error"]))
+    nll = _read_rows(metrics / "autompg" / "bamlss_reference" / "nll.csv")
+    assert nll[0]["model"] == "bamlss_reference"
+
+
+def test_bamlss_reference_route_is_documented_with_seeded_r_script() -> None:
+    """The HITL BAMLSS fixture producer is committed but disabled by default."""
+    script = Path("experiments/uci_benchmark/bamlss/run.R").read_text(encoding="utf-8")
+    readme = Path("experiments/uci_benchmark/README.md").read_text(encoding="utf-8")
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+
+    assert "Script version: issue-0107-bamlss-reference-v1" in script
+    assert "R version pinned for fixture generation:" in script
+    assert "bamlss package version pinned for fixture generation:" in script
+    assert "set.seed" in script
+    assert "provenance.json" in script
+    assert "predictions.csv" in script
+    assert "sample_0001" in script
+    assert 'reticulate::import("numpy"' in script
+    assert config["baselines"]["bamlss_reference"]["enabled"] is False
+    assert config["baselines"]["bamlss_reference"]["fixture_dir"] == "fixtures/bamlss"
+    assert "Rscript experiments/uci_benchmark/bamlss/run.R" in readme
+    assert "bamlss_reference" in readme
+    assert "provenance.json" in readme
+    assert "HITL" in readme
 
 
 def test_readme_documents_the_common_predictive_adapter() -> None:

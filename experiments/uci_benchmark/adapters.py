@@ -7,6 +7,8 @@ distributional aleatoric and effect-level epistemic uncertainty.
 
 from __future__ import annotations
 
+import csv
+import json
 import math
 import subprocess
 import tempfile
@@ -143,6 +145,94 @@ class BayesNamStyleAdapter(DuneBayesAdapter):
 
     name = "BayesNAM-style (our implementation)"
     uncertainty_scope = "mean_only_variational_location"
+
+
+class BamlssFixtureAdapter:
+    """BAMLSS reference predictions loaded from maintainer-run fixtures (#107).
+
+    BAMLSS stays an external R reference.  This adapter only validates and
+    scores the per-observation predictive fixture written by ``bamlss/run.R``.
+    """
+
+    name = "bamlss_reference"
+    uncertainty_scope = "distributional_bamlss_fixture"
+
+    def __init__(self, *, dataset: str, fixture_dir: Path) -> None:
+        self._dataset = dataset
+        self._fixture_dir = fixture_dir
+
+    def fit(self, train_data: DataModule, *, smoke: bool) -> None:
+        """Fixtures were already fit by the seeded R script."""
+        del train_data, smoke
+
+    def predict(
+        self,
+        features: Mapping[str, torch.Tensor],
+        target: torch.Tensor,
+        *,
+        draws: int,
+        predictive_samples: int,
+        seed: int,
+    ) -> PredictiveResult:
+        """Load and validate held-out BAMLSS predictive quantities."""
+        del features, draws, seed
+        dataset_dir = self._fixture_dir / self._dataset
+        prediction_path = dataset_dir / "predictions.csv"
+        provenance_path = dataset_dir / "provenance.json"
+        if not prediction_path.is_file():
+            raise RuntimeError(f"Missing BAMLSS fixture CSV: {prediction_path}.")
+        if not provenance_path.is_file():
+            raise RuntimeError(f"Missing BAMLSS fixture provenance: {provenance_path}.")
+        with provenance_path.open(encoding="utf-8") as handle:
+            provenance = json.load(handle)
+        for key in ("script_version", "seed", "date"):
+            if key not in provenance:
+                raise RuntimeError(
+                    f"BAMLSS fixture provenance is missing required key {key!r}."
+                )
+
+        with prediction_path.open(encoding="utf-8", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        if not rows:
+            raise RuntimeError(f"BAMLSS fixture CSV is empty: {prediction_path}.")
+        rows.sort(key=lambda row: int(row["observation"]))
+        n_obs = int(target.shape[0])
+        if len(rows) != n_obs:
+            raise RuntimeError(
+                f"BAMLSS fixture has {len(rows)} rows, expected {n_obs}."
+            )
+        sample_columns = sorted(
+            column for column in rows[0] if column.startswith("sample_")
+        )
+        if len(sample_columns) < predictive_samples:
+            raise RuntimeError(
+                "BAMLSS fixture has "
+                f"{len(sample_columns)} sample columns, expected at least "
+                f"{predictive_samples}."
+            )
+
+        log_density = torch.tensor(
+            [float(row["log_density"]) for row in rows],
+            dtype=torch.float64,
+        )
+        cdf = torch.tensor([float(row["cdf"]) for row in rows], dtype=torch.float64)
+        samples = torch.tensor(
+            [
+                [float(row[column]) for row in rows]
+                for column in sample_columns[:predictive_samples]
+            ],
+            dtype=torch.float32,
+        )
+        observations = [int(row["observation"]) for row in rows]
+        if observations != list(range(n_obs)):
+            raise RuntimeError("BAMLSS fixture observations must be 0-based and dense.")
+        if {row["dataset"] for row in rows} != {self._dataset}:
+            raise RuntimeError("BAMLSS fixture dataset column does not match config.")
+        if not bool(torch.isfinite(log_density).all()):
+            raise RuntimeError("BAMLSS fixture contains non-finite log_density.")
+        if not bool(((cdf >= 0.0) & (cdf <= 1.0)).all()):
+            raise RuntimeError("BAMLSS fixture CDF values must be inside [0, 1].")
+        return PredictiveResult(samples=samples, log_density=log_density, cdf=cdf)
 
 
 class _PlainMLP(torch.nn.Module):

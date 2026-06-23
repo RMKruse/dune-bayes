@@ -38,6 +38,7 @@ from dune_bayes.model import BayesianNAMLSS  # noqa: E402
 from dune_bayes.shapes import BayesianMLP  # noqa: E402
 from dune_bayes.utils import EPS  # noqa: E402
 from experiments.uci_benchmark.adapters import (  # noqa: E402
+    BamlssFixtureAdapter,
     BayesNamStyleAdapter,
     BenchmarkAdapter,
     DeepEnsembleAdapter,
@@ -426,6 +427,31 @@ def _score_dataset(
                 family="mean_only_laplace_gaussian",
                 bins=int(config["calibration_bins"]),
                 metric_dir=paths.metrics / name / lanam.name,
+            )
+        )
+    bamlss_config = config.get("baselines", {}).get("bamlss_reference", {})
+    if bool(bamlss_config.get("enabled", False)):
+        bamlss: BenchmarkAdapter = BamlssFixtureAdapter(
+            dataset=name,
+            fixture_dir=_experiment_path(str(bamlss_config["fixture_dir"])),
+        )
+        bamlss.fit(train_data, smoke=smoke)
+        bamlss_prediction = bamlss.predict(
+            test_features,
+            test_target,
+            draws=draws_count,
+            predictive_samples=predictive_samples,
+            seed=int(dataset["split_seed"]),
+        )
+        comparison.extend(
+            _write_scores(
+                bamlss_prediction,
+                adapter=bamlss,
+                target=test_target,
+                dataset=name,
+                family=family_name,
+                bins=int(config["calibration_bins"]),
+                metric_dir=paths.metrics / name / bamlss.name,
             )
         )
     plain: BenchmarkAdapter = PlainMLPAdapter(

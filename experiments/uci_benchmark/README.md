@@ -53,8 +53,9 @@ training `DataModule`, held-out feature tensors, targets, and persisted split.
 This keeps model-specific evaluation code out of comparison tables.
 
 The `dune_bayes`, `BayesNAM-style (our implementation)`, `plain_mlp`,
-`deep_ensemble`, optional `nampy_namlss`, and optional `lanam` adapters prove
-the seam end-to-end. `BayesNAM-style (our implementation)` is a labeled
+`deep_ensemble`, optional `nampy_namlss`, optional `lanam`, and optional
+`bamlss_reference` adapters prove the seam end-to-end.
+`BayesNAM-style (our implementation)` is a labeled
 degenerate dune-bayes config: Bayesian shape functions contribute only to the
 Normal location parameter, while a point intercept learns one homoscedastic
 scale. The built-in PyTorch sanity floors are `plain_mlp` and `deep_ensemble`:
@@ -66,6 +67,41 @@ epistemic uncertainty on shape functions. Per-baseline tables live below
 When the BayesNAM-style baseline is enabled, the run also writes
 `figures/<dataset>/bayesnam_style_band_contrast.pdf`, contrasting its mean-only
 epistemic bands with dune-bayes per-parameter bands.
+
+## BAMLSS fixture reference
+
+The BAMLSS route for #107 is HITL by design. The repo commits the seeded
+fixture producer at `bamlss/run.R`, but it does not run R or BAMLSS inside the
+Python/uv CI environment. A maintainer runs the script locally against the same
+cached CSVs and persisted split `.npz` files created by the harness:
+
+```bash
+Rscript experiments/uci_benchmark/bamlss/run.R \
+  --config experiments/uci_benchmark/config.yaml \
+  --dataset autompg \
+  --output-dir experiments/uci_benchmark/fixtures/bamlss \
+  --seed 10701 \
+  --predictive-samples 500
+```
+
+Add `--smoke` when generating the tiny CI tracer fixture. The script writes
+`fixtures/bamlss/<dataset>/predictions.csv` with one row per held-out
+observation: `log_density`, `cdf`, predictive quantiles (`q05`, `q50`, `q95`),
+and response predictive draws `sample_0001` ... `sample_N`. It also writes
+`provenance.json` beside the CSV with the script version, seed, date, split
+path, package versions, and `sessionInfo()`. After those files are committed,
+enable the disabled config block:
+
+```yaml
+baselines:
+  bamlss_reference:
+    enabled: true
+    fixture_dir: fixtures/bamlss
+```
+
+The Python adapter only validates and scores these maintainer-produced
+fixtures. It never reimplements BAMLSS and never imports R from the package
+runtime.
 
 ## Live NAMLSS comparator
 

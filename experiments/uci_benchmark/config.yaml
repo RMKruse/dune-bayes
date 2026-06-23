@@ -82,6 +82,9 @@ baselines:
     python: ../../.venv-lanam/bin/python
     runner: lanam_runner.py
     batch_size: 512
+  bamlss_reference:
+    enabled: false
+    fixture_dir: fixtures/bamlss
 draws: 500
 predictive_samples: 500
 calibration_bins: 10
