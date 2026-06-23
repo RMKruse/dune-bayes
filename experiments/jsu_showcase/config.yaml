@@ -1,0 +1,30 @@
+experiment: jsu_showcase
+seed: 10001
+family: johnson_su
+parameter_names: [skew, tail, loc, scale]
+architecture:
+  hidden_dims: [32, 32]
+  prior_scale: 1.0
+  activation: tanh
+draws: 500
+data:
+  n: 1024
+  grid_size: 200
+truth:
+  intercept: [0.0, 1.2, 0.2, -0.4]
+  effects:
+    - {kind: linear, amplitude: 0.8}
+    - {kind: cos, amplitude: 0.25, frequency: 1.0}
+    - {kind: sin, amplitude: 0.6, frequency: 1.0}
+    - {kind: linear, amplitude: 0.7}
+coverage:
+  levels: [0.5, 0.8, 0.9, 0.95]
+ribbons:
+  credible_level: 0.9
+training:
+  epochs: 2500
+  learning_rate: 0.003
+  warmup_epochs: 100
+artifacts:
+  root: runs
+  run_name: canonical

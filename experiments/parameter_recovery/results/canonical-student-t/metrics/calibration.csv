@@ -1,0 +1,13 @@
+parameter,nominal,empirical_coverage
+location,0.5,0.3359375
+location,0.8,0.609375
+location,0.9,0.80859375
+location,0.95,1.0
+scale,0.5,0.62109375
+scale,0.8,0.8828125
+scale,0.9,1.0
+scale,0.95,1.0
+df,0.5,1.0
+df,0.8,1.0
+df,0.9,1.0
+df,0.95,1.0

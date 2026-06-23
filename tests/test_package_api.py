@@ -5,6 +5,8 @@ re-export can't silently vanish from ``__init__``.
 """
 
 import importlib
+import pkgutil
+import sys
 
 import pytest
 
@@ -80,3 +82,12 @@ def test_no_flipout_naming_anywhere_in_package() -> None:
         if "flipout" in path.read_text(encoding="utf-8").lower()
     ]
     assert offenders == [], f'"flipout" still present in: {offenders}'
+
+
+def test_tensorflow_never_imported_from_dune_bayes_namespace() -> None:
+    """The package remains PyTorch-only even when experiment comparators exist."""
+    for module in pkgutil.walk_packages(db.__path__, prefix=f"{db.__name__}."):
+        importlib.import_module(module.name)
+
+    assert "tensorflow" not in sys.modules
+    assert "tensorflow_probability" not in sys.modules

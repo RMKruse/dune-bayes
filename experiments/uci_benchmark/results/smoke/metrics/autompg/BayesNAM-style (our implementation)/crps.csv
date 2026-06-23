@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+autompg,normal_homoscedastic,BayesNAM-style (our implementation),4,25.591890511279477

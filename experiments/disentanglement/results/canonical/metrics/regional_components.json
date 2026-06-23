@@ -1,0 +1,12 @@
+{
+  "aleatoric_dense": 0.9146125912666321,
+  "aleatoric_dense_to_sparse_ratio": 3.983027142263394,
+  "aleatoric_sparse": 0.22962650656700134,
+  "draws": 500,
+  "epistemic_dense": 0.05242455005645752,
+  "epistemic_sparse": 0.06897726655006409,
+  "epistemic_sparse_to_dense_ratio": 1.3157185089289838,
+  "epochs": 800,
+  "final_loss": 1.730116605758667,
+  "n": 384
+}

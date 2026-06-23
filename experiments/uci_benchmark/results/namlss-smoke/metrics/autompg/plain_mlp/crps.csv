@@ -1,0 +1,2 @@
+dataset,family,n_test,mean_crps
+autompg,gaussian_residual,4,3.6618201146202702

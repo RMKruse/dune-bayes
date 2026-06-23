@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+autompg,gaussian_residual,plain_mlp,4,3.326400399208069

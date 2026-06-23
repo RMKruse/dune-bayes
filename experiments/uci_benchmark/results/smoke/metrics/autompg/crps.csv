@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+autompg,normal,dune_bayes,4,25.277534149369345
