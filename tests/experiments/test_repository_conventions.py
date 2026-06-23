@@ -63,12 +63,14 @@ def test_package_surface_does_not_expose_experiment_backends() -> None:
     assert "import numpyro" not in package_source
 
 
-def test_hmc_suite_is_opt_in_and_covered_by_the_experiment_job() -> None:
-    """Core tests avoid experiment backends while CI runs their smoke contract."""
+def test_slow_suites_are_opt_in_and_covered_by_the_experiment_job() -> None:
+    """Core tests avoid slow experiment tiers while CI runs their contracts."""
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     pytest_config = project["tool"]["pytest"]["ini_options"]
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
 
-    assert pytest_config["addopts"] == "-m 'not hmc'"
+    assert pytest_config["addopts"] == "-m 'not hmc and not experiment'"
     assert any(marker.startswith("hmc:") for marker in pytest_config["markers"])
+    assert any(marker.startswith("experiment:") for marker in pytest_config["markers"])
+    assert "pytest -q -m experiment" in workflow
     assert "pytest -q -m hmc" in workflow

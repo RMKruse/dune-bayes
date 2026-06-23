@@ -48,7 +48,7 @@ select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 testpaths = ["tests"]
 addopts = "-m 'not hmc and not experiment'"
 markers = [
-    "experiment: opt-in full paper experiments excluded from the core suite",
+    "experiment: opt-in full paper experiments and harness tests excluded from the core suite",
     "hmc: opt-in NumPyro/NUTS validation tests requiring experiment dependencies",
 ]
 

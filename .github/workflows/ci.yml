@@ -63,5 +63,8 @@ jobs:
             uv run python "$(dirname "$config")/run.py" "$config" --smoke
           done
 
+      - name: Run experiment-harness tests
+        run: uv run pytest -q -m experiment
+
       - name: Run HMC agreement tests
         run: uv run pytest -q -m hmc
