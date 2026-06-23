@@ -15,6 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 _harness = importlib.import_module("experiments._harness")
@@ -27,7 +28,10 @@ from dune_bayes.families import (  # noqa: E402
     NegativeBinomialFamily,
     NormalFamily,
 )
-from dune_bayes.metrics import crps  # noqa: E402
+from dune_bayes.metrics import (  # noqa: E402
+    crps,
+    variance_decomposition,
+)
 from dune_bayes.model import BayesianNAMLSS  # noqa: E402
 from dune_bayes.shapes import BayesianMLP  # noqa: E402
 from dune_bayes.utils import EPS  # noqa: E402
@@ -35,6 +39,7 @@ from experiments.uci_benchmark.adapters import (  # noqa: E402
     BenchmarkAdapter,
     DeepEnsembleAdapter,
     DuneBayesAdapter,
+    NampyNamlssAdapter,
     PlainMLPAdapter,
     PredictiveResult,
 )
@@ -48,6 +53,26 @@ def _data_path(config: Mapping[str, Any], key: str) -> Path:
     if not path.is_absolute():
         path = _EXPERIMENT_DIR / path
     return path.resolve()
+
+
+def _experiment_path(value: str) -> Path:
+    """Resolve a configured experiment path without touching package state."""
+    path = Path(value)
+    if not path.is_absolute():
+        path = _EXPERIMENT_DIR / path
+    return path.resolve()
+
+
+def _command_path(value: str) -> str:
+    """Resolve a configured command path only when it is path-like."""
+    if "/" not in value and "\\" not in value:
+        return value
+    path = Path(value)
+    if not path.is_absolute():
+        path = _EXPERIMENT_DIR / path
+    # Do not call Path.resolve(): virtualenv Python executables are often
+    # symlinks to a base interpreter, and following them drops pyvenv.cfg.
+    return str(path.absolute())
 
 
 def _cache_key(dataset: Mapping[str, Any], *, smoke: bool) -> str:
@@ -230,6 +255,43 @@ def _score_dataset(
         bins=int(config["calibration_bins"]),
         metric_dir=paths.metrics / name,
     )
+    _write_dune_bayes_uncertainty(
+        prediction,
+        model=model,
+        dataset=name,
+        family=family_name,
+        metric_dir=paths.metrics / name,
+    )
+    namlss_config = config.get("baselines", {}).get("namlss", {})
+    if bool(namlss_config.get("enabled", False)):
+        namlss: BenchmarkAdapter = NampyNamlssAdapter(
+            python=_command_path(str(namlss_config["python"])),
+            runner=_experiment_path(str(namlss_config["runner"])),
+            paper_code_dir=_experiment_path(str(namlss_config["paper_code_dir"])),
+            family=family_name,
+            epochs=int(config["training"]["epochs"]),
+            learning_rate=float(config["training"]["learning_rate"]),
+            batch_size=int(namlss_config.get("batch_size", 512)),
+        )
+        namlss.fit(train_data, smoke=smoke)
+        namlss_prediction = namlss.predict(
+            test_features,
+            test_target,
+            draws=draws_count,
+            predictive_samples=predictive_samples,
+            seed=int(dataset["split_seed"]),
+        )
+        comparison.extend(
+            _write_scores(
+                namlss_prediction,
+                adapter=namlss,
+                target=test_target,
+                dataset=name,
+                family=family_name,
+                bins=int(config["calibration_bins"]),
+                metric_dir=paths.metrics / name / namlss.name,
+            )
+        )
     plain: BenchmarkAdapter = PlainMLPAdapter(
         hidden_dims=hidden_dims,
         epochs=int(config["training"]["epochs"]),
@@ -280,6 +342,82 @@ def _score_dataset(
         )
     )
     return comparison
+
+
+def _linked_parameter_draws(
+    raw_draws: torch.Tensor, family: str
+) -> dict[str, torch.Tensor]:
+    """Convert raw network outputs to family-scale parameter draws."""
+    if family == "negative_binomial":
+        return {
+            "mean": F.softplus(raw_draws[..., 0]) + EPS,
+            "dispersion": F.softplus(raw_draws[..., 1]) + EPS,
+        }
+    if family == "beta":
+        return {
+            "mean": EPS + (1.0 - 2.0 * EPS) * torch.sigmoid(raw_draws[..., 0]),
+            "precision": F.softplus(raw_draws[..., 1]) + EPS,
+        }
+    if family == "normal":
+        return {
+            "loc": raw_draws[..., 0],
+            "scale": F.softplus(raw_draws[..., 1]) + EPS,
+        }
+    return {
+        f"parameter_{index}": raw_draws[..., index]
+        for index in range(int(raw_draws.shape[-1]))
+    }
+
+
+def _write_dune_bayes_uncertainty(
+    prediction: PredictiveResult,
+    *,
+    model: BayesianNAMLSS,
+    dataset: str,
+    family: str,
+    metric_dir: Path,
+) -> None:
+    """Write the Bayesian-only parameter bands and variance decomposition."""
+    raw_draws = prediction.parameter_draws
+    if raw_draws is None:
+        raise RuntimeError("dune-bayes prediction did not expose parameter draws.")
+
+    band_rows: list[dict[str, object]] = []
+    for parameter, draws in _linked_parameter_draws(raw_draws, family).items():
+        quantiles = torch.quantile(
+            draws.to(torch.float64),
+            torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64),
+            dim=0,
+        )
+        for observation in range(int(draws.shape[1])):
+            band_rows.append(
+                {
+                    "dataset": dataset,
+                    "model": "dune_bayes",
+                    "observation": observation,
+                    "parameter": parameter,
+                    "q05": float(quantiles[0, observation]),
+                    "q50": float(quantiles[1, observation]),
+                    "q95": float(quantiles[2, observation]),
+                }
+            )
+    _write_csv(metric_dir / "parameter_bands.csv", band_rows)
+
+    split = variance_decomposition(model, raw_draws)
+    _write_csv(
+        metric_dir / "variance_split.csv",
+        [
+            {
+                "dataset": dataset,
+                "model": "dune_bayes",
+                "observation": observation,
+                "aleatoric": float(split.aleatoric[observation]),
+                "epistemic": float(split.epistemic[observation]),
+                "total": float(split.total[observation]),
+            }
+            for observation in range(int(split.total.shape[0]))
+        ],
+    )
 
 
 def _write_scores(

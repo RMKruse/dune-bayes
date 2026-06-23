@@ -66,6 +66,12 @@ training:
   warmup_epochs: 20
 baselines:
   deep_ensemble_members: 5
+  namlss:
+    enabled: false
+    python: ../../.venv-nampy/bin/python
+    runner: nampy_namlss_runner.py
+    paper_code_dir: ../../namlss-paper-code
+    batch_size: 512
 draws: 500
 predictive_samples: 500
 calibration_bins: 10

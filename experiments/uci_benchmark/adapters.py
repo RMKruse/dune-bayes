@@ -8,10 +8,14 @@ distributional aleatoric and effect-level epistemic uncertainty.
 from __future__ import annotations
 
 import math
+import subprocess
+import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
+import numpy as np
 import torch
 
 from dune_bayes.data import DataModule
@@ -31,11 +35,15 @@ class PredictiveResult:
         log_density: Predictive log-density at each observed response, shape
             ``(n,)``.
         cdf: Predictive CDF at each observed response, shape ``(n,)``.
+        parameter_draws: Optional raw distribution-parameter draws with shape
+            ``(T, n, param_count)``. Only Bayesian adapters expose this; the
+            common scoring contract consumes the first three fields.
     """
 
     samples: torch.Tensor
     log_density: torch.Tensor
     cdf: torch.Tensor
+    parameter_draws: torch.Tensor | None = None
 
 
 class BenchmarkAdapter(Protocol):
@@ -115,7 +123,12 @@ class DuneBayesAdapter:
             randomized=self._randomized_pit,
             seed=seed,
         )
-        return PredictiveResult(samples=samples, log_density=log_density, cdf=cdf)
+        return PredictiveResult(
+            samples=samples,
+            log_density=log_density,
+            cdf=cdf,
+            parameter_draws=posterior.summed_samples,
+        )
 
 
 class _PlainMLP(torch.nn.Module):
@@ -215,6 +228,139 @@ class PlainMLPAdapter:
                 log_density=distribution.log_prob(target).to(torch.float64),
                 cdf=cdf.to(torch.float64),
             )
+
+
+class NampyNamlssAdapter:
+    """External NAMpy/NAMLSS comparator behind the common scoring contract.
+
+    The TensorFlow-era implementation is invoked in a separate Python process
+    so neither TensorFlow nor NAMpy can leak into the ``dune_bayes`` package
+    namespace (ADR-0006, GitHub #104).
+    """
+
+    name = "nampy_namlss"
+
+    def __init__(
+        self,
+        *,
+        python: str,
+        runner: Path,
+        paper_code_dir: Path,
+        family: str,
+        epochs: int,
+        learning_rate: float,
+        batch_size: int = 512,
+    ) -> None:
+        self._python = python
+        self._runner = runner
+        self._paper_code_dir = paper_code_dir
+        self._family = family
+        self._epochs = epochs
+        self._learning_rate = learning_rate
+        self._batch_size = batch_size
+        self._train_matrix: torch.Tensor | None = None
+        self._train_target: torch.Tensor | None = None
+        self._smoke = False
+
+    def fit(self, train_data: DataModule, *, smoke: bool) -> None:
+        """Capture the shared training partition for the external process."""
+        self._smoke = smoke
+        self._train_matrix = _feature_matrix(train_data.features)
+        self._train_target = train_data.target.to(torch.float32)
+
+    def predict(
+        self,
+        features: Mapping[str, torch.Tensor],
+        target: torch.Tensor,
+        *,
+        draws: int,
+        predictive_samples: int,
+        seed: int,
+    ) -> PredictiveResult:
+        """Invoke the configured NAMLSS runner and validate its predictions."""
+        if self._train_matrix is None or self._train_target is None:
+            raise RuntimeError("fit() must be called before predict().")
+
+        test_matrix = _feature_matrix(features)
+        with tempfile.TemporaryDirectory(prefix="dune-bayes-nampy-") as tmp:
+            tmp_path = Path(tmp)
+            input_path = tmp_path / "input.npz"
+            output_path = tmp_path / "prediction.npz"
+            np.savez(
+                input_path,
+                train_features=self._train_matrix.detach().cpu().numpy(),
+                train_target=self._train_target.detach().cpu().numpy(),
+                test_features=test_matrix.detach().cpu().numpy(),
+                test_target=target.detach().cpu().numpy(),
+            )
+            completed = subprocess.run(
+                [
+                    self._python,
+                    str(self._runner),
+                    "--input",
+                    str(input_path),
+                    "--output",
+                    str(output_path),
+                    "--paper-code-dir",
+                    str(self._paper_code_dir),
+                    "--family",
+                    self._family,
+                    "--draws",
+                    str(draws),
+                    "--predictive-samples",
+                    str(predictive_samples),
+                    "--seed",
+                    str(seed),
+                    "--epochs",
+                    str(1 if self._smoke else self._epochs),
+                    "--learning-rate",
+                    str(self._learning_rate),
+                    "--batch-size",
+                    str(self._batch_size),
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError(
+                    "NAMpy NAMLSS runner failed with exit code "
+                    f"{completed.returncode}.\nSTDOUT:\n{completed.stdout}\n"
+                    f"STDERR:\n{completed.stderr}"
+                )
+            if not output_path.exists():
+                raise RuntimeError(
+                    f"NAMLSS runner completed but did not write {output_path}."
+                )
+            with np.load(output_path) as output:
+                samples_array = output["samples"]
+                log_density_array = output["log_density"]
+                cdf_array = output["cdf"]
+
+        samples = torch.tensor(samples_array, dtype=torch.float32)
+        log_density = torch.tensor(log_density_array, dtype=torch.float64)
+        cdf = torch.tensor(cdf_array, dtype=torch.float64)
+        n_obs = int(target.shape[0])
+        if samples.shape != (predictive_samples, n_obs):
+            raise RuntimeError(
+                "NAMLSS runner returned samples with shape "
+                f"{tuple(samples.shape)}, expected {(predictive_samples, n_obs)}."
+            )
+        if log_density.shape != (n_obs,):
+            raise RuntimeError(
+                "NAMLSS runner returned log_density with shape "
+                f"{tuple(log_density.shape)}, expected {(n_obs,)}."
+            )
+        if cdf.shape != (n_obs,):
+            raise RuntimeError(
+                "NAMLSS runner returned cdf with shape "
+                f"{tuple(cdf.shape)}, expected {(n_obs,)}."
+            )
+        if not bool(torch.isfinite(log_density).all()):
+            raise RuntimeError("NAMLSS runner returned non-finite log_density.")
+        if not bool(((cdf >= 0.0) & (cdf <= 1.0)).all()):
+            raise RuntimeError("NAMLSS runner returned CDF values outside [0, 1].")
+        return PredictiveResult(samples=samples, log_density=log_density, cdf=cdf)
 
 
 class DeepEnsembleAdapter:

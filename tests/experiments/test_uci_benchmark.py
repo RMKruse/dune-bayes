@@ -114,6 +114,38 @@ def test_dune_bayes_is_scored_through_the_common_comparison_table(
     assert np.isfinite(float(dune["calibration_error"]))
 
 
+def test_smoke_writes_dune_bayes_parameter_bands_and_variance_split(
+    tmp_path: Path,
+) -> None:
+    """The Bayesian model emits uncertainty artifacts deterministic baselines lack."""
+    completed = _run_smoke(_smoke_config(tmp_path))
+    assert completed.returncode == 0, completed.stderr
+
+    metric_dir = tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics"
+    comparison = _read_rows(metric_dir / "comparison.csv")
+    n_test = int(
+        next(row for row in comparison if row["model"] == "dune_bayes")["n_test"]
+    )
+    bands = _read_rows(metric_dir / "autompg" / "parameter_bands.csv")
+    variance = _read_rows(metric_dir / "autompg" / "variance_split.csv")
+
+    assert len(bands) == 2 * n_test
+    assert {row["model"] for row in bands} == {"dune_bayes"}
+    assert {row["parameter"] for row in bands} == {"loc", "scale"}
+    assert all(
+        float(row["q05"]) <= float(row["q50"]) <= float(row["q95"]) for row in bands
+    )
+    assert len(variance) == n_test
+    assert {row["model"] for row in variance} == {"dune_bayes"}
+    for row in variance:
+        aleatoric = float(row["aleatoric"])
+        epistemic = float(row["epistemic"])
+        total = float(row["total"])
+        assert aleatoric >= 0.0
+        assert epistemic >= 0.0
+        assert total == pytest.approx(aleatoric + epistemic)
+
+
 def test_plain_mlp_is_scored_on_the_same_held_out_observations(
     tmp_path: Path,
 ) -> None:
@@ -156,6 +188,75 @@ def test_deep_ensemble_completes_the_three_model_sanity_panel(
     assert np.isfinite(float(ensemble["calibration_error"]))
 
 
+def test_configured_nampy_namlss_runner_is_scored_beside_dune_bayes(
+    tmp_path: Path,
+) -> None:
+    """The live NAMLSS comparator enters through the same public metric seam."""
+    fake_runner = tmp_path / "fake_nampy_runner.py"
+    fake_runner.write_text(
+        """
+from __future__ import annotations
+
+import argparse
+import numpy as np
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--input", required=True)
+parser.add_argument("--output", required=True)
+parser.add_argument("--paper-code-dir", required=True)
+parser.add_argument("--family", required=True)
+parser.add_argument("--draws", type=int, required=True)
+parser.add_argument("--predictive-samples", type=int, required=True)
+parser.add_argument("--seed", type=int, required=True)
+parser.add_argument("--epochs", type=int, required=True)
+parser.add_argument("--learning-rate", type=float, required=True)
+parser.add_argument("--batch-size", type=int, required=True)
+args = parser.parse_args()
+
+payload = np.load(args.input)
+y = payload["test_target"].astype(float)
+rng = np.random.default_rng(args.seed)
+samples = np.tile(y, (args.predictive_samples, 1)) + rng.normal(
+    scale=1e-6, size=(args.predictive_samples, y.shape[0])
+)
+np.savez(
+    args.output,
+    samples=samples,
+    log_density=np.zeros(y.shape[0], dtype=float),
+    cdf=np.linspace(0.05, 0.95, y.shape[0], dtype=float),
+)
+""",
+        encoding="utf-8",
+    )
+    python_shim = tmp_path / "python-with-uv"
+    python_shim.write_text('#!/bin/sh\nexec uv run python "$@"\n', encoding="utf-8")
+    python_shim.chmod(0o755)
+    config_path = _smoke_config(tmp_path)
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["baselines"]["namlss"] = {
+        "enabled": True,
+        "python": str(python_shim),
+        "runner": str(fake_runner),
+        "paper_code_dir": "namlss-paper-code",
+    }
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    completed = _run_smoke(config_path)
+    assert completed.returncode == 0, completed.stderr
+
+    comparison = _read_rows(
+        tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics" / "comparison.csv"
+    )
+    rows = {row["model"]: row for row in comparison}
+    namlss = rows["nampy_namlss"]
+    assert namlss["dataset"] == rows["dune_bayes"]["dataset"] == "autompg"
+    assert namlss["n_test"] == rows["dune_bayes"]["n_test"]
+    assert np.isfinite(float(namlss["mean_nll"]))
+    assert np.isfinite(float(namlss["mean_crps"]))
+    assert np.isfinite(float(namlss["calibration_error"]))
+
+
 def test_readme_documents_the_common_predictive_adapter() -> None:
     """Future baselines can implement the scoring seam without reading its code."""
     readme = Path("experiments/uci_benchmark/README.md").read_text(encoding="utf-8")
@@ -167,6 +268,27 @@ def test_readme_documents_the_common_predictive_adapter() -> None:
     assert "cdf" in readme
     assert "plain_mlp" in readme
     assert "deep_ensemble" in readme
+    assert "nampy_namlss" in readme
+    assert "separate TensorFlow" in readme
+    assert "namlss-paper-code" in readme
+
+
+def test_nampy_runner_help_is_available_without_tensorflow_import() -> None:
+    """The external runner keeps TensorFlow imports behind execution, not import."""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "experiments/uci_benchmark/nampy_namlss_runner.py",
+            "--help",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0
+    assert "--paper-code-dir" in completed.stdout
+    assert "--family" in completed.stdout
 
 
 def test_results_include_a_promoted_three_model_smoke_comparison() -> None:
@@ -181,6 +303,23 @@ def test_results_include_a_promoted_three_model_smoke_comparison() -> None:
         "deep_ensemble",
     }
     assert all(row["dataset"] == "autompg" for row in rows)
+
+
+def test_results_include_a_promoted_live_nampy_smoke_comparison() -> None:
+    """The live comparator table is reviewable without rerunning TensorFlow."""
+    result_dir = Path("experiments/uci_benchmark/results/namlss-smoke")
+    rows = _read_rows(result_dir / "metrics" / "comparison.csv")
+    readme = (result_dir / "README.md").read_text(encoding="utf-8")
+
+    assert {row["model"] for row in rows} == {
+        "dune_bayes",
+        "nampy_namlss",
+        "plain_mlp",
+        "deep_ensemble",
+    }
+    assert all(row["dataset"] == "autompg" for row in rows)
+    assert "not a published-number comparison" in readme
+    assert "original configs" in readme
 
 
 def test_panel_config_declares_standard_datasets_and_response_families() -> None:

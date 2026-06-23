@@ -1,0 +1,5 @@
+dataset,family,model,n_test,mean_nll,mean_crps,calibration_error
+autompg,normal,dune_bayes,4,327.4373997352461,25.277534149369345,0.18
+autompg,normal,nampy_namlss,4,168.67920875549316,18.90951827000226,0.18
+autompg,gaussian_residual,plain_mlp,4,3.373918294906616,3.6618201146202702,0.13999999999999999
+autompg,gaussian_residual_mixture,deep_ensemble,4,3.1994872863761135,2.4617572167227344,0.12
