@@ -39,6 +39,7 @@ from experiments.uci_benchmark.adapters import (  # noqa: E402
     BenchmarkAdapter,
     DeepEnsembleAdapter,
     DuneBayesAdapter,
+    LANAMAdapter,
     NampyNamlssAdapter,
     PlainMLPAdapter,
     PredictiveResult,
@@ -292,6 +293,35 @@ def _score_dataset(
                 metric_dir=paths.metrics / name / namlss.name,
             )
         )
+    lanam_config = config.get("baselines", {}).get("lanam", {})
+    if bool(lanam_config.get("enabled", False)):
+        lanam: BenchmarkAdapter = LANAMAdapter(
+            python=_command_path(str(lanam_config["python"])),
+            runner=_experiment_path(str(lanam_config["runner"])),
+            family=family_name,
+            epochs=int(config["training"]["epochs"]),
+            learning_rate=float(config["training"]["learning_rate"]),
+            batch_size=int(lanam_config.get("batch_size", 512)),
+        )
+        lanam.fit(train_data, smoke=smoke)
+        lanam_prediction = lanam.predict(
+            test_features,
+            test_target,
+            draws=draws_count,
+            predictive_samples=predictive_samples,
+            seed=int(dataset["split_seed"]),
+        )
+        comparison.extend(
+            _write_scores(
+                lanam_prediction,
+                adapter=lanam,
+                target=test_target,
+                dataset=name,
+                family="mean_only_laplace_gaussian",
+                bins=int(config["calibration_bins"]),
+                metric_dir=paths.metrics / name / lanam.name,
+            )
+        )
     plain: BenchmarkAdapter = PlainMLPAdapter(
         hidden_dims=hidden_dims,
         epochs=int(config["training"]["epochs"]),
@@ -465,6 +495,7 @@ def _write_scores(
             "dataset": dataset,
             "family": family,
             "model": adapter.name,
+            "uncertainty_scope": getattr(adapter, "uncertainty_scope", "predictive"),
             "n_test": len(target),
             "mean_nll": float(nll.mean()),
             "mean_crps": float(crps_values.mean()),
