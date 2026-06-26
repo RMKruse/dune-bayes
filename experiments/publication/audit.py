@@ -410,6 +410,14 @@ def _human_report(payload: dict[str, Any]) -> str:
             ),
             f"- Benchmark gate: {_ready_text(payload['benchmark_gate']['ready'])}",
             f"- Paper artifacts: {_ready_text(payload['paper_artifacts']['ready'])}",
+            "- Paper artifact outputs:",
+        ]
+    )
+    lines.extend(
+        f"  - {Path(output).name}" for output in payload["paper_artifacts"]["outputs"]
+    )
+    lines.extend(
+        [
             "",
             "## Bounded Scope",
             "",

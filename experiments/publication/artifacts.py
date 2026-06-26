@@ -81,11 +81,16 @@ def build_paper_artifacts(
         entries=entries,
         base=base,
     )
+    appendix = destination / "reviewer-evidence-appendix.md"
+    _write_reviewer_appendix(
+        appendix,
+        entries=entries,
+    )
 
     return ArtifactBuildReport(
         ready=True,
         failures=(),
-        outputs=(*figure_outputs, *table_outputs, summary_table, provenance),
+        outputs=(*figure_outputs, *table_outputs, summary_table, provenance, appendix),
     )
 
 
@@ -338,6 +343,155 @@ def _write_provenance(
         ],
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", "utf-8")
+
+
+def _write_reviewer_appendix(
+    path: Path,
+    *,
+    entries: tuple[dict[str, Any], ...],
+) -> None:
+    """Write the reviewer-facing claim-to-evidence appendix."""
+    output_records = _artifact_output_records(entries)
+    lines = [
+        "# Reviewer Evidence Appendix",
+        "",
+        "This appendix is generated from the promoted publication evidence manifest.",
+        "",
+    ]
+    _append_reviewer_notes(lines)
+    for artifact_class in _artifact_classes(entries):
+        lines.extend([f"## {_artifact_class_heading(artifact_class)}", ""])
+        for entry in entries:
+            evidence = entry["evidence"]
+            if str(evidence.get("artifact_class", "")) != artifact_class:
+                continue
+            _append_claim_evidence(lines, entry, output_records=output_records)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _append_reviewer_notes(lines: list[str]) -> None:
+    """Append ADR-backed conventions that reviewers need beside the evidence."""
+    lines.extend(
+        [
+            "## Reviewer Conventions",
+            "",
+            "- epistemic effect ribbons are centered, epistemic-only credible "
+            "ribbons for per-feature effects. They are not response-level "
+            "predictive bands.",
+            "- response-level predictive bands combine epistemic + aleatoric "
+            "uncertainty and are interpreted as prediction intervals.",
+            "- centered effect recovery is evaluated against centered posterior "
+            "draws because additive shape functions are identified only up to "
+            "level; intercept coverage is reported separately.",
+            "- Simulation coverage is measured and reported rather than asserted "
+            "correct, preserving the mean-field VI narrowness limitation in "
+            "ADR-0001.",
+            "- VI-vs-NUTS evidence is validation-only NUTS evidence from "
+            "experiments/. dune-bayes does not ship an MCMC backend; ADR-0006 "
+            "keeps JAX/NumPyro behind a future inference seam.",
+            "- Family parameterizations follow the package glossary: positivity "
+            "uses softplus(x) + EPS, and Johnson's SU uses the scipy johnsonsu "
+            "parameterization.",
+            "",
+        ]
+    )
+
+
+def _artifact_classes(entries: tuple[dict[str, Any], ...]) -> tuple[str, ...]:
+    """Return artifact classes in manifest order."""
+    classes: list[str] = []
+    for entry in entries:
+        artifact_class = str(entry["evidence"].get("artifact_class", ""))
+        if artifact_class not in classes:
+            classes.append(artifact_class)
+    return tuple(classes)
+
+
+def _artifact_class_heading(artifact_class: str) -> str:
+    """Return reviewer-facing evidence class labels."""
+    headings = {
+        "simulation": "Simulation Evidence",
+        "real_data_benchmark": "Real-Data Benchmark Evidence",
+        "validation": "Validation Evidence",
+    }
+    return headings.get(
+        artifact_class, f"{artifact_class.replace('_', ' ').title()} Evidence"
+    )
+
+
+def _append_claim_evidence(
+    lines: list[str],
+    entry: dict[str, Any],
+    *,
+    output_records: tuple[dict[str, str], ...],
+) -> None:
+    """Append one claim-to-evidence mapping to appendix lines."""
+    claim = entry["claim"]
+    evidence = entry["evidence"]
+    claim_id = str(claim.get("id", ""))
+    evidence_path = str(evidence.get("path", ""))
+    claim_outputs = [
+        record["output"]
+        for record in output_records
+        if record["claim_id"] == claim_id and record["evidence_path"] == evidence_path
+    ]
+    lines.extend(
+        [
+            f"### {claim_id}",
+            "",
+            str(claim.get("statement", "")).strip(),
+            "",
+            f"- Evidence class: {evidence.get('artifact_class', '')}",
+            f"- Promoted evidence: {evidence.get('path', '')}",
+            "- Artifact-builder outputs:",
+        ]
+    )
+    lines.extend(f"  - {output}" for output in claim_outputs)
+    lines.append("")
+
+
+def _artifact_output_records(
+    entries: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, str], ...]:
+    """Return stable appendix output records for each manifest-declared artifact."""
+    return (
+        *_declared_output_records(
+            entries,
+            parent="figures",
+            output_parent="figures",
+            suffixes=None,
+        ),
+        *_declared_output_records(
+            entries,
+            parent="metrics",
+            output_parent="tables",
+            suffixes={".csv"},
+        ),
+    )
+
+
+def _declared_output_records(
+    entries: tuple[dict[str, Any], ...],
+    *,
+    parent: str,
+    output_parent: str,
+    suffixes: set[str] | None,
+) -> tuple[dict[str, str], ...]:
+    """Return appendix records using the same naming rules as copied artifacts."""
+    records = _declared_files(entries, parent=parent, suffixes=suffixes)
+    counts = _candidate_counts(records)
+    used: set[str] = set()
+    output_records: list[dict[str, str]] = []
+    for record in records:
+        output_name = _stable_output_name(record, counts=counts, used=used)
+        output_records.append(
+            {
+                "claim_id": str(record["claim_id"]),
+                "evidence_path": str(record["evidence_path"]),
+                "output": f"{output_parent}/{output_name}",
+            }
+        )
+    return tuple(output_records)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

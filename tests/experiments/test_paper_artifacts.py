@@ -23,19 +23,21 @@ def _write_promoted_result(
     root: Path,
     *,
     result_path: str = "experiments/disentanglement/results/canonical",
+    experiment: str = "disentanglement",
+    seed: int = 9901,
     smoke: bool = False,
 ) -> None:
     result = root / result_path
     _write_json(
         result / "run.json",
         {
-            "experiment": "disentanglement",
-            "seed": 9901,
+            "experiment": experiment,
+            "seed": seed,
             "smoke": smoke,
             "git_sha": "abc123",
         },
     )
-    (result / "config.yaml").write_text("seed: 9901\n", encoding="utf-8")
+    (result / "config.yaml").write_text(f"seed: {seed}\n", encoding="utf-8")
     _write_json(result / "metrics" / "regional_components.json", {"draws": 500})
     (result / "figures").mkdir()
     (result / "figures" / "disentanglement.pdf").write_bytes(b"%PDF-1.4\n")
@@ -89,6 +91,7 @@ def test_builder_writes_stable_artifact_paths_and_provenance(
         output_dir / "figures" / "central-disentanglement__disentanglement.pdf",
         output_dir / "tables" / "evidence-summary.csv",
         output_dir / "provenance.json",
+        output_dir / "reviewer-evidence-appendix.md",
     )
     assert (
         output_dir / "figures" / "central-disentanglement__disentanglement.pdf"
@@ -108,6 +111,122 @@ def test_builder_writes_stable_artifact_paths_and_provenance(
             },
         }
     ]
+
+
+def test_builder_writes_reviewer_appendix_from_promoted_evidence(
+    tmp_path: Path,
+) -> None:
+    """The paper build emits a reviewer-facing claim-to-evidence appendix."""
+    _write_promoted_result(tmp_path)
+    manifest_path = _write_manifest(tmp_path)
+    output_dir = tmp_path / "paper"
+
+    report = build_paper_artifacts(manifest_path, output_dir=output_dir, root=tmp_path)
+
+    appendix = output_dir / "reviewer-evidence-appendix.md"
+    assert report.ready is True
+    assert appendix in report.outputs
+    text = appendix.read_text(encoding="utf-8")
+    assert "# Reviewer Evidence Appendix" in text
+    assert "central-disentanglement" in text
+    assert "Variance decomposition separates uncertainty." in text
+    assert "simulation" in text
+    assert "experiments/disentanglement/results/canonical" in text
+    assert "figures/central-disentanglement__disentanglement.pdf" in text
+
+
+def test_reviewer_appendix_separates_simulation_and_real_data_evidence(
+    tmp_path: Path,
+) -> None:
+    """The appendix distinguishes simulation claims from benchmark claims."""
+    simulation_path = "experiments/disentanglement/results/canonical"
+    benchmark_path = "experiments/uci_benchmark/results/canonical"
+    _write_promoted_result(tmp_path, result_path=simulation_path)
+    _write_promoted_result(
+        tmp_path,
+        result_path=benchmark_path,
+        experiment="uci_benchmark",
+        seed=102,
+    )
+    manifest = {
+        "version": 1,
+        "claims": [
+            {
+                "id": "central-disentanglement",
+                "family": "disentanglement",
+                "statement": "Simulation uncertainty decomposition.",
+                "requires": "full",
+                "evidence": {
+                    "path": simulation_path,
+                    "artifact_class": "simulation",
+                    "expected_files": [
+                        "config.yaml",
+                        "run.json",
+                        "metrics/regional_components.json",
+                        "figures/disentanglement.pdf",
+                    ],
+                    "provenance": {"experiment": "disentanglement", "seed": 9901},
+                },
+            },
+            {
+                "id": "benchmark-comparator-panel",
+                "family": "benchmark_comparator",
+                "statement": "Real-data benchmark comparison.",
+                "requires": "full",
+                "evidence": {
+                    "path": benchmark_path,
+                    "artifact_class": "real_data_benchmark",
+                    "expected_files": [
+                        "config.yaml",
+                        "run.json",
+                        "metrics/regional_components.json",
+                        "figures/disentanglement.pdf",
+                    ],
+                    "provenance": {"experiment": "uci_benchmark", "seed": 102},
+                },
+            },
+        ],
+    }
+    manifest_path = tmp_path / "manifest.yaml"
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), "utf-8")
+    output_dir = tmp_path / "paper"
+
+    report = build_paper_artifacts(manifest_path, output_dir=output_dir, root=tmp_path)
+
+    assert report.ready is True
+    text = (output_dir / "reviewer-evidence-appendix.md").read_text("utf-8")
+    assert "## Simulation Evidence" in text
+    assert "central-disentanglement" in text
+    assert "## Real-Data Benchmark Evidence" in text
+    assert "benchmark-comparator-panel" in text
+
+
+def test_reviewer_appendix_documents_uncertainty_and_methods_conventions(
+    tmp_path: Path,
+) -> None:
+    """The appendix carries ADR-backed reviewer notes, not ad hoc method text."""
+    _write_promoted_result(tmp_path)
+    manifest_path = _write_manifest(tmp_path)
+    output_dir = tmp_path / "paper"
+
+    report = build_paper_artifacts(manifest_path, output_dir=output_dir, root=tmp_path)
+
+    assert report.ready is True
+    text = (output_dir / "reviewer-evidence-appendix.md").read_text("utf-8")
+    assert "epistemic effect ribbons" in text
+    assert "response-level predictive bands" in text
+    assert "epistemic-only" in text
+    assert "epistemic + aleatoric" in text
+    assert "centered effect recovery" in text
+    assert "intercept coverage" in text
+    assert "coverage is measured" in text
+    assert "mean-field VI narrowness" in text
+    assert "validation-only NUTS" in text
+    assert "does not ship an MCMC backend" in text
+    assert "ADR-0001" in text
+    assert "ADR-0006" in text
+    assert "Johnson's SU" in text
+    assert "softplus(x) + EPS" in text
 
 
 def test_builder_reports_missing_canonical_input(tmp_path: Path) -> None:
@@ -275,6 +394,12 @@ def test_builder_disambiguates_repeated_declared_table_basenames(
     assert table_b in report.outputs
     assert table_a.read_text("utf-8") == "dataset,model,nll\na,dune_bayes,1.25\n"
     assert table_b.read_text("utf-8") == "dataset,model,nll\nb,dune_bayes,1.50\n"
+    appendix = (output_dir / "reviewer-evidence-appendix.md").read_text("utf-8")
+    path_a_block = appendix.split(f"- Promoted evidence: {path_a}", maxsplit=1)[
+        1
+    ].split(f"- Promoted evidence: {path_b}", maxsplit=1)[0]
+    assert "benchmark-comparator-panel__canonical-a__comparison.csv" in path_a_block
+    assert "benchmark-comparator-panel__canonical-b__comparison.csv" not in path_a_block
 
 
 def test_cli_builds_paper_artifacts_from_manifest(tmp_path: Path) -> None:
@@ -311,3 +436,4 @@ def test_readme_documents_paper_artifact_builder_command() -> None:
     assert "experiments.publication.artifacts" in readme
     assert "--output-dir" in readme
     assert "promoted" in readme
+    assert "reviewer-evidence-appendix.md" in readme

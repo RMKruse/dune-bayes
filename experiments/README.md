@@ -79,10 +79,13 @@ uv run --extra experiments python -m experiments.publication.artifacts \
   --output-dir experiments/publication/paper-artifacts
 ```
 
-The builder writes deterministic table and figure filenames plus
-`provenance.json` for manuscript, appendix, or release references. It only reads
-canonical paths declared by the manifest; scratch `runs/` output must be promoted
-before it can become paper evidence.
+The builder writes deterministic table and figure filenames, `provenance.json`,
+and `reviewer-evidence-appendix.md` for manuscript, appendix, or release
+references. The appendix maps claims to promoted evidence and artifact-builder
+outputs, separates simulation evidence from real-data benchmark evidence, and
+records the ADR-backed uncertainty conventions reviewers need beside the paper.
+It only reads canonical paths declared by the manifest; scratch `runs/` output
+must be promoted before it can become paper evidence.
 
 ## Bounded reproducibility audit
 

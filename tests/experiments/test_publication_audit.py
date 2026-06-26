@@ -163,6 +163,10 @@ def test_bounded_audit_writes_machine_and_human_reports(tmp_path: Path) -> None:
     assert payload["evidence_manifest"]["claim_count"] == 1
     assert payload["benchmark_gate"]["ready"] is True
     assert payload["paper_artifacts"]["ready"] is True
+    assert any(
+        output.endswith("reviewer-evidence-appendix.md")
+        for output in payload["paper_artifacts"]["outputs"]
+    )
     assert payload["bounded_scope"]["full_canonical_reruns"] == "manual"
     assert "Full canonical experiment reruns are manual" in payload["caveats"]
 
@@ -170,6 +174,7 @@ def test_bounded_audit_writes_machine_and_human_reports(tmp_path: Path) -> None:
     assert "# Bounded Reproducibility Audit" in human
     assert "core fixture check: pass" in human
     assert "experiment smoke fixture: pass" in human
+    assert "reviewer-evidence-appendix.md" in human
     assert "Full canonical experiment reruns are manual" in human
 
 
