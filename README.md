@@ -51,8 +51,9 @@ uv pip install -e .
 import torch
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.families import NormalFamily
-from dune_bayes.sampling import sample_effects
-from dune_bayes.plotting import plot_effect_ribbon
+from dune_bayes.metrics import variance_decomposition
+from dune_bayes.sampling import draw_predictive, sample_effects
+from dune_bayes.plotting import plot_dist, plot_effect_ribbon
 from dune_bayes.compare import compare
 
 # Toy data: nonlinear effect on the mean, Gaussian noise.
@@ -71,6 +72,11 @@ model.fit(X, y, epochs=200)
 draws = sample_effects(model, X, T=200)        # {feature: Tensor[T, n, param_count]}
 plot_effect_ribbon(draws["x1"], x1.squeeze(-1))
 
+# Response-level posterior predictive band: epistemic + aleatoric uncertainty.
+predictive = draw_predictive(model, X, T=200)
+plot_dist(predictive.predictive, y)
+uncertainty = variance_decomposition(model, predictive.summed_samples)
+
 # Bayes-vs-deterministic comparison, ranked by PSIS-LOO.
 baseline = BayesianNAMLSS.from_formula(
     "y ~ MLP(x1) + MLP(x2)", family=NormalFamily(), n_obs=n
@@ -86,6 +92,11 @@ nets over multiple inputs (`BayesianMLP(x1):BayesianMLP(x2)`); categorical
 features become Bayesian embeddings — the neural analog of a random effect,
 with partial pooling of rare levels. Families shipped so far:
 `NormalFamily`, `StudentTFamily`, `GammaFamily`.
+
+The effect ribbon is a centered per-feature shape-function summary, so it shows
+epistemic uncertainty in one learned contribution. The response band comes from
+the posterior predictive distribution and includes aleatoric uncertainty from
+the family as well; `variance_decomposition` reports that split numerically.
 
 ## Architecture
 
@@ -125,6 +136,8 @@ columns, `GammaFamily` → 2). The full walkthrough lives in
 ## Documentation
 
 - [`CONTEXT.md`](CONTEXT.md) — the statistical contract and glossary (start here).
+- [`docs/tutorials/reader_workflow.md`](docs/tutorials/reader_workflow.md) — a
+  short formula → fit → effect ribbon → posterior predictive band tutorial.
 - [`docs/architecture.md`](docs/architecture.md) — the model graph: feature
   nets → additive sum → family links → ELBO / posterior predictive.
 - [`docs/adr/`](docs/adr/) — the six design decisions (inference engine,
