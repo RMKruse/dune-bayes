@@ -30,7 +30,10 @@ Three goals, in priority order:
 Pre-v1 research software (`0.1.0.dev0`). The statistical design is settled
 (see [`docs/adr/`](docs/adr/)) and the core path — formula → fit → effect
 bands → WAIC/LOO — works and is tested, but the API may still change without
-deprecation. Python 3.12+, CPU by default, CUDA opt-in.
+deprecation. Python 3.12+, CPU by default, CUDA opt-in. Publication metadata for
+the planned `v0.1.0-paper` artifact release lives in
+[`experiments/publication/release-metadata.yaml`](experiments/publication/release-metadata.yaml);
+the final paper/preprint citation and Zenodo DOI remain pending author approval.
 
 ## Install
 
@@ -132,8 +135,11 @@ columns, `GammaFamily` → 2). The full walkthrough lives in
 
 ## Citing
 
-There is no dune-bayes paper yet. If you use the package, please cite the
-repository, and the NAMLSS framework it builds on:
+Citation metadata is recorded in [`CITATION.cff`](CITATION.cff). Until the
+planned `v0.1.0-paper` artifact release is tagged and archived on Zenodo, please
+cite the repository and the NAMLSS framework it builds on. The dune-bayes
+preferred paper citation in `CITATION.cff` is a pending slot and must be replaced
+with the author-approved preprint or submission citation before the release tag.
 
 > Thielmann, A. F., Kruse, R.-M., Kneib, T., & Säfken, B. (2024). Neural
 > additive models for location scale and shape: A framework for interpretable
