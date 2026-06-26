@@ -9,6 +9,7 @@ release:
   citation_metadata: CITATION.cff
   release_notes: docs/releases/0.1.0-paper-artifact.md
   artifact_archiving_instructions: docs/publication/artifact-archiving.md
+  deferred_register: docs/publication/deferred-nice-to-haves.md
   evidence_manifest: experiments/publication/evidence-manifest.yaml
   benchmark_gate: experiments/uci_benchmark/results/canonical/benchmark-claims.yaml
   paper_artifact_builder_output: experiments/publication/paper-artifacts

@@ -77,3 +77,44 @@ def test_readme_citation_text_matches_release_metadata_state() -> None:
     assert "v0.1.0-paper" in readme
     assert "pending author approval" in readme
     assert "Zenodo" in readme
+
+
+def test_deferred_register_keeps_followups_outside_publication_blockers() -> None:
+    """Deferred paper follow-ups are recorded apart from blocking release work."""
+    metadata = yaml.safe_load(
+        Path("experiments/publication/release-metadata.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    register_path = Path(metadata["release"]["deferred_register"])
+
+    assert register_path.is_file()
+    register = register_path.read_text(encoding="utf-8")
+
+    assert "PRD #128" in register
+    assert "not required for the first paper artifact" in register
+    assert "reviewer or correctness issue changes their status" in register
+    assert "without reopening" in register
+    assert "out-of-scope" in register
+    for theme in (
+        "Ablation",
+        "Baseline",
+        "Performance",
+        "Documentation",
+        "Family Tier",
+        "Inference",
+        "Runtime Backend",
+    ):
+        assert f"| {theme} |" in register
+    for deferred_item in (
+        "prior-tier ablations",
+        "posterior-draw sensitivity",
+        "runtime scaling",
+        "richer baselines",
+        "tutorial notebooks",
+        "documentation site",
+        "richer variational families",
+        "JAX-backed performance",
+    ):
+        assert deferred_item in register
+    assert "Future issue seed" in register
