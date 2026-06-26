@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+yacht,normal,dune_bayes,62,8.984154298910873

@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+kin8nm,normal,dune_bayes,1638,0.13287459847197539

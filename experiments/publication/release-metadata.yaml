@@ -1,0 +1,37 @@
+version: 1
+release:
+  name: dune-bayes paper artifact
+  paper_artifact_version: 0.1.0-paper
+  package_version: 0.1.0
+  current_development_version: 0.1.0.dev0
+  planned_tag: v0.1.0-paper
+  target_branch: dev
+  citation_metadata: CITATION.cff
+  release_notes: docs/releases/0.1.0-paper-artifact.md
+  artifact_archiving_instructions: docs/publication/artifact-archiving.md
+  deferred_register: docs/publication/deferred-nice-to-haves.md
+  evidence_manifest: experiments/publication/evidence-manifest.yaml
+  benchmark_gate: experiments/uci_benchmark/results/canonical/benchmark-claims.yaml
+  paper_artifact_builder_output: experiments/publication/paper-artifacts
+  reproducibility_audit:
+    command: >-
+      uv run python -m experiments.publication.audit --root . --output-dir
+      experiments/publication/reproducibility-audit
+    human_report: experiments/publication/reproducibility-audit/audit-report.md
+    machine_report: experiments/publication/reproducibility-audit/audit-report.json
+  tag_policy: >-
+    Tag only after the bounded reproducibility audit is ready, the final
+    paper/preprint citation has author approval, and the DOI deposit draft has
+    been reviewed.
+doi_deposit:
+  provider: Zenodo
+  archive_scope:
+    - source code at the planned tag
+    - promoted canonical results under experiments/*/results/canonical*
+    - generated paper artifacts under experiments/publication/paper-artifacts
+    - bounded reproducibility audit reports
+  doi_status: pending tag-time archive
+  manual_approval_required:
+    - final paper/preprint citation and author order
+    - Zenodo metadata, DOI reservation, and record visibility
+    - exact release date and target commit

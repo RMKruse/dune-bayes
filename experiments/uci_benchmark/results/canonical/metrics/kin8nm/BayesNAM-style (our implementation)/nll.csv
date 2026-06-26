@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+kin8nm,normal_homoscedastic,BayesNAM-style (our implementation),1638,-0.12363218898728094

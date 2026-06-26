@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+kin8nm,gaussian_residual,plain_mlp,1638,0.05523670392417568

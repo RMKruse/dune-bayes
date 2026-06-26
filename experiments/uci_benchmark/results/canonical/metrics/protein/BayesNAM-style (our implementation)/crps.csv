@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+protein,normal_homoscedastic,BayesNAM-style (our implementation),9146,3.5826715958826765

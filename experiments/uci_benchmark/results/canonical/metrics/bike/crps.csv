@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+bike,negative_binomial,dune_bayes,3476,172.368492432506

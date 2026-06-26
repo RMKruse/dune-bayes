@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+bike,normal_homoscedastic,BayesNAM-style (our implementation),3476,7616.728053990966

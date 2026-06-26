@@ -30,7 +30,10 @@ Three goals, in priority order:
 Pre-v1 research software (`0.1.0.dev0`). The statistical design is settled
 (see [`docs/adr/`](docs/adr/)) and the core path — formula → fit → effect
 bands → WAIC/LOO — works and is tested, but the API may still change without
-deprecation. Python 3.12+, CPU by default, CUDA opt-in.
+deprecation. Python 3.12+, CPU by default, CUDA opt-in. Publication metadata for
+the planned `v0.1.0-paper` artifact release lives in
+[`experiments/publication/release-metadata.yaml`](experiments/publication/release-metadata.yaml);
+the final paper/preprint citation and Zenodo DOI remain pending author approval.
 
 ## Install
 
@@ -48,8 +51,9 @@ uv pip install -e .
 import torch
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.families import NormalFamily
-from dune_bayes.sampling import sample_effects
-from dune_bayes.plotting import plot_effect_ribbon
+from dune_bayes.metrics import variance_decomposition
+from dune_bayes.sampling import draw_predictive, sample_effects
+from dune_bayes.plotting import plot_dist, plot_effect_ribbon
 from dune_bayes.compare import compare
 
 # Toy data: nonlinear effect on the mean, Gaussian noise.
@@ -68,6 +72,11 @@ model.fit(X, y, epochs=200)
 draws = sample_effects(model, X, T=200)        # {feature: Tensor[T, n, param_count]}
 plot_effect_ribbon(draws["x1"], x1.squeeze(-1))
 
+# Response-level posterior predictive band: epistemic + aleatoric uncertainty.
+predictive = draw_predictive(model, X, T=200)
+plot_dist(predictive.predictive, y)
+uncertainty = variance_decomposition(model, predictive.summed_samples)
+
 # Bayes-vs-deterministic comparison, ranked by PSIS-LOO.
 baseline = BayesianNAMLSS.from_formula(
     "y ~ MLP(x1) + MLP(x2)", family=NormalFamily(), n_obs=n
@@ -83,6 +92,11 @@ nets over multiple inputs (`BayesianMLP(x1):BayesianMLP(x2)`); categorical
 features become Bayesian embeddings — the neural analog of a random effect,
 with partial pooling of rare levels. Families shipped so far:
 `NormalFamily`, `StudentTFamily`, `GammaFamily`.
+
+The effect ribbon is a centered per-feature shape-function summary, so it shows
+epistemic uncertainty in one learned contribution. The response band comes from
+the posterior predictive distribution and includes aleatoric uncertainty from
+the family as well; `variance_decomposition` reports that split numerically.
 
 ## Architecture
 
@@ -122,6 +136,8 @@ columns, `GammaFamily` → 2). The full walkthrough lives in
 ## Documentation
 
 - [`CONTEXT.md`](CONTEXT.md) — the statistical contract and glossary (start here).
+- [`docs/tutorials/reader_workflow.md`](docs/tutorials/reader_workflow.md) — a
+  short formula → fit → effect ribbon → posterior predictive band tutorial.
 - [`docs/architecture.md`](docs/architecture.md) — the model graph: feature
   nets → additive sum → family links → ELBO / posterior predictive.
 - [`docs/adr/`](docs/adr/) — the six design decisions (inference engine,
@@ -132,8 +148,11 @@ columns, `GammaFamily` → 2). The full walkthrough lives in
 
 ## Citing
 
-There is no dune-bayes paper yet. If you use the package, please cite the
-repository, and the NAMLSS framework it builds on:
+Citation metadata is recorded in [`CITATION.cff`](CITATION.cff). Until the
+planned `v0.1.0-paper` artifact release is tagged and archived on Zenodo, please
+cite the repository and the NAMLSS framework it builds on. The dune-bayes
+preferred paper citation in `CITATION.cff` is a pending slot and must be replaced
+with the author-approved preprint or submission citation before the release tag.
 
 > Thielmann, A. F., Kruse, R.-M., Kneib, T., & Säfken, B. (2024). Neural
 > additive models for location scale and shape: A framework for interpretable

@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+autompg,gaussian_residual_mixture,deep_ensemble,78,1.4467791168119684

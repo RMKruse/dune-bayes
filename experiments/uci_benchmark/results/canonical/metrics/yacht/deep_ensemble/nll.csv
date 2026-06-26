@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+yacht,gaussian_residual_mixture,deep_ensemble,62,1.8185584153162577

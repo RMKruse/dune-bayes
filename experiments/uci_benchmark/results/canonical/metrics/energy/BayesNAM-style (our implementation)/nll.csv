@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+energy,normal_homoscedastic,BayesNAM-style (our implementation),154,4.713232383199885

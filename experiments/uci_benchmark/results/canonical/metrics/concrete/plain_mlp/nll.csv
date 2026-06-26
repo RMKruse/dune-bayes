@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+concrete,gaussian_residual,plain_mlp,206,3.1287966769875832

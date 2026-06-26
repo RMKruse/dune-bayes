@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+naval,beta,dune_bayes,2387,0.007986155601429328

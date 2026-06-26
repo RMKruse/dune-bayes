@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+bike,normal_homoscedastic,BayesNAM-style (our implementation),3476,128.8002942013327

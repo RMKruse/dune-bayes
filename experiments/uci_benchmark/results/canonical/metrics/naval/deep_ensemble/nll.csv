@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+naval,gaussian_residual_mixture,deep_ensemble,2387,-3.8627330955073282

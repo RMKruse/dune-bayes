@@ -35,6 +35,28 @@ Bayesian-only: deterministic comparators can be scored on the same held-out
 predictive quantities, but they do not expose per-parameter bands or the
 aleatoric/epistemic variance decomposition.
 
+## Benchmark publication gate
+
+The smoke tests prove that the harness, adapters, and shared metric path still run
+on bounded CI workloads. They are not acceptable paper evidence for full-panel
+benchmark claims. Before citing UCI/comparator results, run the publication gate
+against a claim/evidence manifest and the promoted `results/` directory:
+
+```bash
+uv run --extra experiments python experiments/uci_benchmark/publication_gate.py \
+  path/to/benchmark-claims.yaml
+```
+
+The claim/evidence manifest lists the claimed datasets and response families,
+baselines, metrics (`nll`, `crps`, `calibration`), and the promoted result tree
+that should support the claim. For full evidence, `run.json` must record
+`"smoke": false`; `config.yaml` must contain the claimed dataset families;
+`metrics/comparison.csv` must contain every claimed dataset/baseline row; and
+each metric must have its promoted table under `metrics/<dataset>/` for
+`dune_bayes` or `metrics/<dataset>/<baseline>/` for comparators. A missing
+dataset/baseline/metric combination is accepted only when an explicit exclusion
+with a reason is recorded in the manifest or in benchmark metadata.
+
 ## Common predictive adapter
 
 Every comparison model implements the two-method `BenchmarkAdapter` in

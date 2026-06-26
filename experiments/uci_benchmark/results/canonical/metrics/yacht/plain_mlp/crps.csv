@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+yacht,gaussian_residual,plain_mlp,62,0.6871803226996214

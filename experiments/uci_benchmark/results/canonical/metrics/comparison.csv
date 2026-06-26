@@ -1,0 +1,41 @@
+dataset,family,model,uncertainty_scope,n_test,mean_nll,mean_crps,calibration_error
+autompg,normal,dune_bayes,distributional_parameter_bands,78,5.430565030700721,12.11877532510451,0.16
+autompg,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,78,7.023231114547582,2.307063480359605,0.0958974358974359
+autompg,gaussian_residual,plain_mlp,predictive_only,78,2.460730818601755,1.534288246276855,0.0241025641025641
+autompg,gaussian_residual_mixture,deep_ensemble,predictive_only,78,2.3861824115575416,1.4467791168119684,0.023076923076923075
+concrete,normal,dune_bayes,distributional_parameter_bands,206,11.91664430720063,23.665705547694273,0.1566990291262136
+concrete,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,206,22.586756055019194,5.088240022855703,0.12116504854368933
+concrete,gaussian_residual,plain_mlp,predictive_only,206,3.1287966769875832,3.019989833707527,0.01262135922330097
+concrete,gaussian_residual_mixture,deep_ensemble,predictive_only,206,3.105517004608573,3.0184310610688563,0.015533980582524271
+energy,normal,dune_bayes,distributional_parameter_bands,154,14.217630158056307,18.96247732922263,0.17870129870129872
+energy,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,154,4.713232383199885,1.6319476087546823,0.049090909090909095
+energy,gaussian_residual,plain_mlp,predictive_only,154,2.453190812042781,1.442369993408154,0.03428571428571429
+energy,gaussian_residual_mixture,deep_ensemble,predictive_only,154,2.1321616482192,1.0918135973784264,0.029350649350649342
+kin8nm,normal,dune_bayes,distributional_parameter_bands,1638,0.11432074689447685,0.13287459847197539,0.058754578754578755
+kin8nm,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,1638,-0.12363218898728094,0.11861168729932826,0.02449328449328449
+kin8nm,gaussian_residual,plain_mlp,predictive_only,1638,-0.8777411173988174,0.05523670392417568,0.00703296703296703
+kin8nm,gaussian_residual_mixture,deep_ensemble,predictive_only,1638,-0.9651121066520701,0.05093114452306474,0.011135531135531136
+naval,beta,dune_bayes,distributional_parameter_bands,2387,-2.8782731900725596,0.007986155601429328,0.055760368663594476
+naval,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,2387,0.019855058313867694,0.0953605769030987,0.15991621281943863
+naval,gaussian_residual,plain_mlp,predictive_only,2387,-3.860147636507064,0.002797548474859593,0.021265186426476748
+naval,gaussian_residual_mixture,deep_ensemble,predictive_only,2387,-3.8627330955073282,0.002819931976106508,0.023560955173858405
+power,normal,dune_bayes,distributional_parameter_bands,1914,1754.3630219228194,441.0641866432652,0.18
+power,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,1914,19472.39335472031,289.2058377748968,0.18
+power,gaussian_residual,plain_mlp,predictive_only,1914,2.8377870982717197,2.2890238673429537,0.007251828631138979
+power,gaussian_residual_mixture,deep_ensemble,predictive_only,1914,2.843526541786175,2.2996907891809575,0.007419017763845352
+protein,normal,dune_bayes,distributional_parameter_bands,9146,3.1986395210659757,3.4590739948855767,0.061163350098403665
+protein,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,9146,8.15410220787909,3.5826715958826765,0.11668051607260006
+protein,gaussian_residual,plain_mlp,predictive_only,9146,2.9777084011075377,2.6950058050167316,0.01483927399956265
+protein,gaussian_residual_mixture,deep_ensemble,predictive_only,9146,2.9746303851862717,2.6874221854986438,0.017078504264159196
+wine,normal,dune_bayes,distributional_parameter_bands,320,1.1724923018412485,0.405092702576312,0.04625
+wine,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,320,1.0849176219807426,0.38398116339293714,0.03874999999999999
+wine,gaussian_residual,plain_mlp,predictive_only,320,1.01858735345304,0.35690371892361455,0.015624999999999997
+wine,gaussian_residual_mixture,deep_ensemble,predictive_only,320,0.9613857573945019,0.34681588886806025,0.01125
+yacht,normal,dune_bayes,distributional_parameter_bands,62,8.466606946463491,8.984154298910873,0.08838709677419355
+yacht,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,62,6.630613579136016,2.5986666975365758,0.07548387096774194
+yacht,gaussian_residual,plain_mlp,predictive_only,62,1.7326029865972457,0.6871803226996214,0.05161290322580645
+yacht,gaussian_residual_mixture,deep_ensemble,predictive_only,62,1.8185584153162577,0.7215490585679057,0.03612903225806452
+bike,negative_binomial,dune_bayes,distributional_parameter_bands,3476,8.347713439192212,172.368492432506,0.14014959723820483
+bike,normal_homoscedastic,BayesNAM-style (our implementation),mean_only_variational_location,3476,7616.728053990966,128.8002942013327,0.15729574223245107
+bike,gaussian_residual,plain_mlp,predictive_only,3476,6.429072046170163,81.36647781781643,0.033107019562715764
+bike,gaussian_residual_mixture,deep_ensemble,predictive_only,3476,6.429581352477461,81.4888087352931,0.033509781357882615

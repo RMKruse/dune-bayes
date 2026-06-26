@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+power,normal,dune_bayes,1914,441.0641866432652

@@ -1,0 +1,159 @@
+version: 1
+claims:
+  - id: central-disentanglement
+    family: disentanglement
+    statement: >
+      The law-of-total-variance decomposition separates epistemic effect
+      uncertainty from aleatoric family uncertainty in the synthetic dense/noisy
+      versus sparse/quiet setting.
+    requires: full
+    evidence:
+      path: experiments/disentanglement/results/canonical
+      artifact_class: simulation
+      expected_files:
+        - config.yaml
+        - run.json
+        - arrays/decomposition.npz
+        - metrics/regional_components.json
+        - figures/disentanglement.pdf
+      file_hashes:
+        config.yaml: 4f8f6c71a0805bbca7485d85d4c181b0279a353cc518ef6086514380f952463f
+        run.json: be93d2fc4eb5a8ed282f6e8daf27da574b4044673d78a99d0872abd1b9db0645
+        metrics/regional_components.json: 7120553740b5ad35ffe162ef9718a2894b61e486f1fe485d22486f764719887e
+      provenance:
+        experiment: disentanglement
+        seed: 9901
+
+  - id: per-feature-per-parameter-epistemic-bands
+    family: epistemic_bands
+    statement: >
+      Per-feature, per-parameter epistemic effect bands are recoverable across
+      Normal, Gamma, Student-t, and Johnson's SU publication simulations.
+    requires: full
+    evidence:
+      - path: experiments/parameter_recovery/results/canonical-normal
+        artifact_class: simulation
+        expected_files:
+          - config.yaml
+          - run.json
+          - arrays/recovery.npz
+          - metrics/calibration.csv
+          - metrics/intercept_coverage.csv
+          - figures/recovery.pdf
+          - figures/calibration.pdf
+        file_hashes:
+          config.yaml: 472673e0435dedc978147a8c3b056184c72145902bac9eeb61998146ec908b89
+          run.json: c01aeca712ef336be28bc0249c2e3c6a4f82e38ebf32e9422fc36865a240634b
+          metrics/calibration.csv: a3a80ca99231636b213d0c40759c880a8f7f036a154e21570da9d1614c1798df
+        provenance:
+          experiment: parameter_recovery_normal
+          seed: 9801
+      - path: experiments/parameter_recovery/results/canonical-student-t
+        artifact_class: simulation
+        expected_files:
+          - config.yaml
+          - run.json
+          - arrays/recovery.npz
+          - metrics/calibration.csv
+          - metrics/intercept_coverage.csv
+          - figures/recovery.pdf
+          - figures/calibration.pdf
+        file_hashes:
+          config.yaml: 59985ff31b2efd0f3ebcb0a2ea0ee7b09353ad5aba4bb5423504b2a1e0d79d3e
+          run.json: 0738f18e47a374bce71b7571f09dd39ca03e580509e0aaa5454e2077f5fac9f0
+          metrics/calibration.csv: d3b865b603d9eac663dfeaa1ec3c483059675dfc3bb7106338492260bfe7352d
+        provenance:
+          experiment: parameter_recovery_student_t
+          seed: 9802
+      - path: experiments/parameter_recovery/results/canonical-gamma
+        artifact_class: simulation
+        expected_files:
+          - config.yaml
+          - run.json
+          - arrays/recovery.npz
+          - metrics/calibration.csv
+          - metrics/intercept_coverage.csv
+          - figures/recovery.pdf
+          - figures/calibration.pdf
+        file_hashes:
+          config.yaml: b7cdff0dfd769f4e8867cb99679d5d91ff9a445dc29cfd45d850f6a6b2f858a2
+          run.json: 3ac8d47ecd0cfaf3be69e4d89a1de72e8f1b2fdb9b1bd299804e785b4a5a5e08
+          metrics/calibration.csv: 1e76fc0f288b545b7d6ab87d84d358ce6ecaf75cd7218281edc634e5d3910984
+        provenance:
+          experiment: parameter_recovery_gamma
+          seed: 9803
+      - path: experiments/jsu_showcase/results/canonical
+        artifact_class: simulation
+        expected_files:
+          - config.yaml
+          - run.json
+          - arrays/recovery.npz
+          - metrics/coverage.csv
+          - metrics/intercept_coverage.csv
+          - figures/effect_ribbons.pdf
+        file_hashes:
+          config.yaml: 9d6cdd93984c5fa9805d3ab71a0ad4a4048feb1336a6bdcf48982441ceaab651
+          run.json: 74425de1537242ec99fa13e1bd5b986801899b519a682e10a86305fdeb3f4edc
+          metrics/coverage.csv: 11f4f658eddfd463a2e27d576b6511e7eae46bbe6fc378e54eb2fec8844069fa
+        provenance:
+          experiment: jsu_showcase
+          seed: 10001
+
+  - id: vi-vs-nuts-limitation
+    family: vi_vs_nuts_limitation
+    statement: >
+      Mean-field VI effect bands are compared against validation-only NUTS so
+      under-coverage and band-width limitations are quantified rather than
+      asserted away.
+    requires: full
+    evidence:
+      path: experiments/hmc_agreement/results/canonical
+      artifact_class: validation
+      expected_files:
+        - config.yaml
+        - run.json
+        - arrays/posterior_bands.npz
+        - metrics/diagnostics.json
+        - metrics/parameter_intervals.csv
+        - metrics/band_width_ratios.csv
+        - figures/vi_vs_nuts.pdf
+      file_hashes:
+        config.yaml: 4ccac5e65055e3bbd4b2c444dc619ff52c22d682cf6c2aca980bb221f7b1668b
+        run.json: 64e45b4d9980fd8222201dda0881d446009742124d2d51fca14b0246566280f5
+        metrics/diagnostics.json: c9ab041607ecb3c99d88738d0b04b3481d68326c4d734e402191ea5af5fd5e02
+      provenance:
+        experiment: hmc_agreement
+        seed: 101
+
+  - id: benchmark-comparator-panel
+    family: benchmark_comparator
+    statement: >
+      UCI benchmark and comparator claims are backed by a full canonical
+      ten-dataset panel for dune-bayes, the BayesNAM-style degenerate baseline,
+      plain MLP, and deep ensemble; optional NAMLSS, LA-NAM, and BAMLSS
+      comparators are explicitly excluded with documented reasons.
+    requires: full
+    evidence:
+      path: experiments/uci_benchmark/results/canonical
+      artifact_class: real_data_benchmark
+      expected_files:
+        - README.md
+        - benchmark-claims.yaml
+        - config.yaml
+        - run.json
+        - metrics/comparison.csv
+        - metrics/autompg/nll.csv
+        - metrics/autompg/crps.csv
+        - metrics/autompg/calibration.csv
+        - metrics/autompg/variance_split.csv
+        - metrics/naval/nll.csv
+        - metrics/bike/nll.csv
+      file_hashes:
+        README.md: b63bbec80efdbe8d7ad417467c63e40c37e3905ee005a07dbe45058783cafb4b
+        benchmark-claims.yaml: f5108b530b80b4a580ed8a3815be785a5e1a0526cbbf885815866d3a0c5b8a7f
+        config.yaml: 11b3ed67bba25388453939a83d01399abf7e3d8618af0c6696546a11b0b05772
+        run.json: 609e149896259340ecd21d4bcbefe150e93bb83d9139085ecfdbd4ec19a19a59
+        metrics/comparison.csv: 3f6b6e994ef2c04acfcef98a2de6804c8045643c13d87977b456efbeea2f86ff
+      provenance:
+        experiment: uci_benchmark
+        seed: 102

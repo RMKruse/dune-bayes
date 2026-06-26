@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+energy,gaussian_residual,plain_mlp,154,1.442369993408154

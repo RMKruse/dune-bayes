@@ -1,0 +1,32 @@
+cff-version: "1.2.0"
+message: >-
+  If you use dune-bayes, cite this repository release and, once available, the
+  author-approved dune-bayes paper/preprint listed as the preferred citation.
+title: dune-bayes
+authors:
+  - family-names: Kruse
+    given-names: R.-M.
+abstract: >-
+  DUNE (Distributional Uncertainty in Neural-additive Estimation) provides
+  Bayesian additive models for location, scale, and shape with mean-field
+  variational inference in PyTorch.
+keywords:
+  - Bayesian additive models
+  - distributional regression
+  - neural additive models
+  - variational inference
+license: MIT
+repository-code: https://github.com/RMKruse/dune-bayes
+url: https://github.com/RMKruse/dune-bayes
+version: 0.1.0.dev0
+preferred-citation:
+  type: article
+  title: "DUNE: Distributional Uncertainty in Neural-additive Estimation"
+  authors:
+    - family-names: Kruse
+      given-names: R.-M.
+  year: 2026
+  url: https://github.com/RMKruse/dune-bayes
+  notes: >-
+    Paper DOI/preprint citation pending author approval; replace this
+    preferred-citation before tagging the paper artifact release.

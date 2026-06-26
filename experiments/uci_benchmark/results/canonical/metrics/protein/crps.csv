@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_crps
+protein,normal,dune_bayes,9146,3.4590739948855767
