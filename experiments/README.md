@@ -69,3 +69,17 @@ inspected and promoted first. The benchmark/comparator claim now points at the
 promoted full UCI panel in `uci_benchmark/results/canonical`; the companion
 `benchmark-claims.yaml` records which comparators were scored and which optional
 external baselines were explicitly excluded.
+
+Build the paper-facing artifact package from the same promoted manifest evidence
+with:
+
+```bash
+uv run --extra experiments python -m experiments.publication.artifacts \
+  experiments/publication/evidence-manifest.yaml --root . \
+  --output-dir experiments/publication/paper-artifacts
+```
+
+The builder writes deterministic table and figure filenames plus
+`provenance.json` for manuscript, appendix, or release references. It only reads
+canonical paths declared by the manifest; scratch `runs/` output must be promoted
+before it can become paper evidence.
