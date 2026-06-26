@@ -83,3 +83,31 @@ The builder writes deterministic table and figure filenames plus
 `provenance.json` for manuscript, appendix, or release references. It only reads
 canonical paths declared by the manifest; scratch `runs/` output must be promoted
 before it can become paper evidence.
+
+## Bounded reproducibility audit
+
+From a fresh clone, install the reviewer-facing bounded path with the checked-in
+lockfile and both dependency groups:
+
+```bash
+uv sync --locked --extra dev --extra experiments
+```
+
+Then run the bounded publication audit:
+
+```bash
+uv run python -m experiments.publication.audit \
+  --root . \
+  --output-dir experiments/publication/reproducibility-audit
+```
+
+The audit runs the core package checks, every experiment `--smoke` command, the
+experiment/HMC smoke-test markers, evidence-manifest validation, the benchmark
+publication gate, and paper artifact assembly. It emits
+`audit-report.json` for release automation and `audit-report.md` for reviewers.
+
+Interpret the report as a bounded regeneration check, not as a new full paper
+run. Full canonical experiment reruns are manual: the promoted `results/`
+directories remain the reviewed source for paper claims, while smoke outputs
+only prove that the CLIs and artifact contracts still execute in a clean
+environment.
