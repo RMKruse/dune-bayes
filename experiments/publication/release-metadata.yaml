@@ -5,7 +5,7 @@ release:
   package_version: 0.1.0
   current_development_version: 0.1.0.dev0
   planned_tag: v0.1.0-paper
-  target_branch: dev
+  target_branch: main
   citation_metadata: CITATION.cff
   release_notes: docs/releases/0.1.0-paper-artifact.md
   artifact_archiving_instructions: docs/publication/artifact-archiving.md
