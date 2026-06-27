@@ -182,6 +182,47 @@ Planned manuscript outputs:
 - Table/figure: VI-versus-NUTS band-width and interval comparison.
 - Table: UCI real-data characterization with comparator exclusions stated.
 
+### UCI Benchmark Characterization
+
+The UCI benchmark is a ten-dataset characterization panel, not a predictive
+ranking exercise.
+The promoted full evidence lives at
+`experiments/uci_benchmark/results/canonical` and is the source for
+`tables/benchmark-comparator-panel__comparison.csv` plus the per-dataset NLL,
+CRPS, calibration, and variance-decomposition tables. The characterization table
+is generated from promoted canonical evidence, not the NAMLSS smoke tracer and
+not scratch runs under `experiments/uci_benchmark/runs`. This is not a claim of
+universal predictive dominance.
+
+The canonical benchmark gate declares these dataset/family pairs: autompg
+(normal), concrete (normal), energy (normal), kin8nm (normal), naval (beta after
+the open-unit response transform), power (normal), protein (normal), wine
+(normal), yacht (normal), and bike (negative binomial). Every comparison row is
+scored through the shared predictive scoring metrics NLL, CRPS, and PIT
+calibration. Those metrics characterize real-data predictive fit and calibration;
+the paper's main uncertainty-structure contribution remains per-feature,
+per-parameter epistemic shape-function bands and the response-level
+epistemic/aleatoric variance decomposition.
+
+The promoted canonical comparators are the full BayesianNAMLSS implementation in
+dune-bayes, a BayesNAM-style degenerate configuration of the same package, a
+plain MLP, and a deep ensemble. The BayesNAM-style row is not a canonical
+external implementation; it is an in-package location-only variational baseline
+that makes the mean-only comparison visible under the same scoring harness.
+Table rows should preserve the uncertainty scope labels
+`distributional_parameter_bands`, `mean_only_variational_location`, and
+`predictive_only` so readers do not mistake a predictive-only baseline for a
+distributional shape-function method.
+
+External NAMpy/NAMLSS, LA-NAM, and BAMLSS/R are documented exclusions for this
+submission rather than promoted canonical evidence. NAMpy/NAMLSS remains
+optional TensorFlow-era process-boundary code; the promoted live NAMLSS smoke
+tracer proves the boundary, but it is not cited as a paper benchmark result.
+LA-NAM was not enabled for the canonical run. BAMLSS/R fixtures are not
+available for the full ten-dataset panel, beyond the Auto MPG fixture that tests
+the scoring seam. These exclusions should be explained in reviewer-facing
+language rather than hidden in table footnotes.
+
 Every number, figure, or table should be generated from promoted artifacts under
 `experiments/*/results/canonical` through the paper artifact builder, never from
 `experiments/*/runs` scratch output.
