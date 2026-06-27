@@ -10,6 +10,9 @@ from experiments.publication.manuscript import validate_claim_ledger
 
 LEDGER = Path("docs/manuscript/claim-ledger.yaml")
 MANUSCRIPT = Path("docs/manuscript/dune-bayes-paper.md")
+BENCHMARK_CLAIMS = Path(
+    "experiments/uci_benchmark/results/canonical/benchmark-claims.yaml"
+)
 
 
 def _write_evidence_manifest(root: Path) -> Path:
@@ -222,6 +225,55 @@ def test_methods_section_covers_adr_backed_math_contract() -> None:
         token for group in concept_groups for token in group if token not in methods
     ]
     assert missing == []
+
+
+def test_benchmark_section_matches_accepted_comparator_scope() -> None:
+    """The benchmark prose honors comparator decision #145 for slice #147."""
+    manuscript = MANUSCRIPT.read_text(encoding="utf-8")
+    benchmark = _section(
+        manuscript,
+        "### UCI Benchmark Characterization",
+        "## Limitations",
+    )
+    normalized = " ".join(benchmark.lower().split())
+    claim = yaml.safe_load(BENCHMARK_CLAIMS.read_text(encoding="utf-8"))["claims"][0]
+    scope = claim["scope_decision"]
+
+    for dataset in claim["datasets"]:
+        assert dataset["name"] in normalized
+    for family in {dataset["family"] for dataset in claim["datasets"]}:
+        family_spellings = {family, family.replace("_", " ")}
+        assert any(spelling in normalized for spelling in family_spellings)
+    for metric in claim["metrics"]:
+        assert metric in normalized
+
+    for scored_comparator in [
+        "full BayesianNAMLSS implementation",
+        "BayesNAM-style",
+        "plain MLP",
+        "deep ensemble",
+    ]:
+        assert scored_comparator.lower() in normalized
+    assert "degenerate configuration of the same package" in normalized
+    assert "not a canonical external implementation" in normalized
+
+    for excluded in scope["excluded_external_comparators"]:
+        assert excluded["manuscript_name"].lower() in normalized
+    assert "documented exclusions" in normalized
+    assert "experiments/uci_benchmark/results/canonical" in benchmark
+    assert "not the namlss smoke tracer" in normalized
+    assert "not scratch runs" in normalized
+    assert "predictive scoring" in normalized
+    assert "uncertainty-structure contribution" in normalized
+    assert "not a claim of universal predictive dominance" in normalized
+
+    unsupported_claims = [
+        "state-of-the-art",
+        "leaderboard",
+        "outperforms all",
+        "dominates all",
+    ]
+    assert [phrase for phrase in unsupported_claims if phrase in normalized] == []
 
 
 def _section(text: str, start: str, end: str) -> str:
