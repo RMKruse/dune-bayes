@@ -12,6 +12,34 @@ from pathlib import Path
 import numpy as np
 import yaml
 
+PRIOR_SWEEP_CANDIDATES = {
+    "normal-empirical-bayes.yaml": {
+        "prior_scale": 1.0,
+        "prior": "empirical_bayes",
+        "mode": "empirical_bayes",
+    },
+    "normal-fixed-0p3.yaml": {
+        "prior_scale": 0.3,
+        "prior": None,
+        "mode": "fixed",
+    },
+    "normal-fixed-1p0.yaml": {
+        "prior_scale": 1.0,
+        "prior": None,
+        "mode": "fixed",
+    },
+    "normal-fixed-3p0.yaml": {
+        "prior_scale": 3.0,
+        "prior": None,
+        "mode": "fixed",
+    },
+    "normal-hierarchical-ig.yaml": {
+        "prior_scale": 1.0,
+        "prior": {"mode": "hierarchical", "hyperprior": "inverse_gamma"},
+        "mode": "hierarchical",
+    },
+}
+
 
 def _smoke_config(tmp_path: Path, source_name: str) -> Path:
     """Copy one public config while redirecting artifacts into a tempdir."""
@@ -46,6 +74,43 @@ def test_normal_smoke_writes_recovery_and_calibration_artifacts(
     assert (run / "figures" / "recovery.pdf").is_file()
     assert (run / "metrics" / "calibration.csv").is_file()
     assert (run / "metrics" / "prior_scale.json").is_file()
+
+
+def test_prior_tier_dict_scale_runs_without_legacy_prior_scale(
+    tmp_path: Path,
+) -> None:
+    """A full prior-tier spec can carry its own initial smoothness scale."""
+    config_path = _smoke_config(tmp_path, "config-normal.yaml")
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["architecture"].pop("prior_scale")
+    config["architecture"]["prior"] = {"mode": "empirical_bayes", "scale": 1.0}
+    config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "experiments/parameter_recovery/run.py",
+            str(config_path),
+            "--smoke",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    diagnostics = json.loads(
+        (
+            tmp_path
+            / "parameter_recovery_normal"
+            / "smoke"
+            / "metrics"
+            / "prior_scale.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert diagnostics["mode"] == "empirical_bayes"
+    assert diagnostics["initial_scale"] == 1.0
+    assert diagnostics["configured_prior_scale"] == 1.0
 
 
 def test_family_panel_reports_every_parameter_and_intercept_separately(
@@ -150,27 +215,28 @@ def test_prior_sweep_configs_are_pre_registered() -> None:
     sweep_dir = Path("experiments/parameter_recovery/prior_sweep")
     configs = sorted(path.name for path in sweep_dir.glob("normal-*.yaml"))
 
-    assert configs == [
-        "normal-empirical-bayes.yaml",
-        "normal-fixed-0p3.yaml",
-        "normal-fixed-1p0.yaml",
-        "normal-fixed-3p0.yaml",
-        "normal-hierarchical-ig.yaml",
-    ]
+    assert configs == sorted(PRIOR_SWEEP_CANDIDATES)
     for filename in configs:
+        expected = PRIOR_SWEEP_CANDIDATES[filename]
         config = yaml.safe_load((sweep_dir / filename).read_text(encoding="utf-8"))
         assert config["family"] == "normal"
         assert config["experiment"] == "parameter_recovery_normal"
         assert config["artifacts"]["root"] == "../runs"
+        assert config["architecture"]["prior_scale"] == expected["prior_scale"]
+        assert config["architecture"].get("prior") == expected["prior"]
 
 
 def test_prior_sweep_smoke_writes_prior_scale_diagnostics(tmp_path: Path) -> None:
-    """EB and hierarchical candidates expose interpretable scale diagnostics."""
-    expected_modes = {
-        "prior_sweep/normal-empirical-bayes.yaml": "empirical_bayes",
-        "prior_sweep/normal-hierarchical-ig.yaml": "hierarchical",
-    }
-    for source_name, mode in expected_modes.items():
+    """Each prior candidate executes and emits the required smoke artifacts."""
+    required_artifacts = (
+        "figures/recovery.pdf",
+        "metrics/calibration.csv",
+        "metrics/intercept_coverage.csv",
+        "metrics/prior_scale.json",
+        "arrays/recovery.npz",
+    )
+    for filename, expected in PRIOR_SWEEP_CANDIDATES.items():
+        source_name = f"prior_sweep/{filename}"
         config_path = _smoke_config(tmp_path, source_name)
         completed = subprocess.run(
             [
@@ -185,16 +251,18 @@ def test_prior_sweep_smoke_writes_prior_scale_diagnostics(tmp_path: Path) -> Non
         )
         assert completed.returncode == 0, completed.stderr
 
-        diagnostics_path = (
-            tmp_path
-            / "parameter_recovery_normal"
-            / "smoke"
-            / "metrics"
-            / "prior_scale.json"
-        )
+        run = tmp_path / "parameter_recovery_normal" / "smoke"
+        for artifact in required_artifacts:
+            assert (run / artifact).is_file(), filename
+
+        diagnostics_path = run / "metrics" / "prior_scale.json"
         diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+        mode = expected["mode"]
         assert diagnostics["mode"] == mode
-        if mode == "empirical_bayes":
+        assert diagnostics["configured_prior_scale"] == expected["prior_scale"]
+        if mode == "fixed":
+            assert diagnostics["scale"] == expected["prior_scale"]
+        elif mode == "empirical_bayes":
             assert diagnostics["scale"] > 0.0
         else:
             assert diagnostics["hyperprior"] == "inverse_gamma"
