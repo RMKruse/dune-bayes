@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+bike,negative_binomial,dune_bayes,3476,8.347713439192212

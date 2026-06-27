@@ -1,0 +1,211 @@
+version: 1
+artifacts:
+- output: figures/central-disentanglement__disentanglement.pdf
+  claim_id: central-disentanglement
+  evidence_path: experiments/disentanglement/results/canonical
+  source_file: figures/disentanglement.pdf
+  artifact_class: simulation
+  uncertainty_component: variance split
+  caption: 'Central disentanglement figure: epistemic effect uncertainty rises in
+    sparse regions while aleatoric family uncertainty rises in noisy regions, exposing
+    the variance split.'
+- output: figures/per-feature-per-parameter-epistemic-bands__canonical-normal__recovery.pdf
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-normal
+  source_file: figures/recovery.pdf
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Normal parameter-recovery figure: centered per-feature effect ribbons
+    show epistemic effect uncertainty for distributional shape functions.'
+- output: figures/per-feature-per-parameter-epistemic-bands__canonical-normal__calibration.pdf
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-normal
+  source_file: figures/calibration.pdf
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Normal coverage figure: measured coverage summarizes the epistemic effect
+    uncertainty bands rather than asserting nominal calibration.'
+- output: figures/per-feature-per-parameter-epistemic-bands__canonical-student-t__recovery.pdf
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-student-t
+  source_file: figures/recovery.pdf
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Student-t parameter-recovery figure: centered per-feature effect ribbons
+    show epistemic effect uncertainty for distributional shape functions.'
+- output: figures/per-feature-per-parameter-epistemic-bands__canonical-student-t__calibration.pdf
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-student-t
+  source_file: figures/calibration.pdf
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Student-t coverage figure: measured coverage summarizes the epistemic
+    effect uncertainty bands while preserving the mean-field narrowness limitation.'
+- output: figures/per-feature-per-parameter-epistemic-bands__canonical-gamma__recovery.pdf
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-gamma
+  source_file: figures/recovery.pdf
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Gamma parameter-recovery figure: centered per-feature effect ribbons show
+    epistemic effect uncertainty for distributional shape functions.'
+- output: figures/per-feature-per-parameter-epistemic-bands__canonical-gamma__calibration.pdf
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-gamma
+  source_file: figures/calibration.pdf
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Gamma coverage figure: measured coverage summarizes the epistemic effect
+    uncertainty bands for positive-response distributional parameters.'
+- output: figures/per-feature-per-parameter-epistemic-bands__effect_ribbons.pdf
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/jsu_showcase/results/canonical
+  source_file: figures/effect_ribbons.pdf
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Johnson''s SU showcase figure: epistemic effect uncertainty is shown for
+    location, scale, skewness, and tail-weight shape functions.'
+- output: figures/vi-vs-nuts-limitation__vi_vs_nuts.pdf
+  claim_id: vi-vs-nuts-limitation
+  evidence_path: experiments/hmc_agreement/results/canonical
+  source_file: figures/vi_vs_nuts.pdf
+  artifact_class: validation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'VI-versus-NUTS validation figure: epistemic effect uncertainty bands are
+    compared with validation-only NUTS to show mean-field band-width limitations.'
+- output: tables/per-feature-per-parameter-epistemic-bands__canonical-normal__calibration.csv
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-normal
+  source_file: metrics/calibration.csv
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Normal calibration table: measured per-parameter coverage for epistemic
+    effect uncertainty bands.'
+- output: tables/per-feature-per-parameter-epistemic-bands__canonical-normal__intercept_coverage.csv
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-normal
+  source_file: metrics/intercept_coverage.csv
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Normal intercept table: intercept coverage is reported separately from
+    centered epistemic effect uncertainty.'
+- output: tables/per-feature-per-parameter-epistemic-bands__canonical-student-t__calibration.csv
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-student-t
+  source_file: metrics/calibration.csv
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Student-t calibration table: measured per-parameter coverage for epistemic
+    effect uncertainty bands.'
+- output: tables/per-feature-per-parameter-epistemic-bands__canonical-student-t__intercept_coverage.csv
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-student-t
+  source_file: metrics/intercept_coverage.csv
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Student-t intercept table: intercept coverage is reported separately from
+    centered epistemic effect uncertainty.'
+- output: tables/per-feature-per-parameter-epistemic-bands__canonical-gamma__calibration.csv
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-gamma
+  source_file: metrics/calibration.csv
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Gamma calibration table: measured per-parameter coverage for epistemic
+    effect uncertainty bands.'
+- output: tables/per-feature-per-parameter-epistemic-bands__canonical-gamma__intercept_coverage.csv
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/parameter_recovery/results/canonical-gamma
+  source_file: metrics/intercept_coverage.csv
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Gamma intercept table: intercept coverage is reported separately from
+    centered epistemic effect uncertainty.'
+- output: tables/per-feature-per-parameter-epistemic-bands__coverage.csv
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/jsu_showcase/results/canonical
+  source_file: metrics/coverage.csv
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Johnson''s SU coverage table: measured per-parameter coverage for epistemic
+    effect uncertainty bands.'
+- output: tables/per-feature-per-parameter-epistemic-bands__canonical__intercept_coverage.csv
+  claim_id: per-feature-per-parameter-epistemic-bands
+  evidence_path: experiments/jsu_showcase/results/canonical
+  source_file: metrics/intercept_coverage.csv
+  artifact_class: simulation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'Johnson''s SU intercept table: intercept coverage is reported separately
+    from centered epistemic effect uncertainty.'
+- output: tables/vi-vs-nuts-limitation__parameter_intervals.csv
+  claim_id: vi-vs-nuts-limitation
+  evidence_path: experiments/hmc_agreement/results/canonical
+  source_file: metrics/parameter_intervals.csv
+  artifact_class: validation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'VI-versus-NUTS interval table: parameter intervals quantify epistemic
+    effect uncertainty differences between mean-field VI and validation-only NUTS.'
+- output: tables/vi-vs-nuts-limitation__band_width_ratios.csv
+  claim_id: vi-vs-nuts-limitation
+  evidence_path: experiments/hmc_agreement/results/canonical
+  source_file: metrics/band_width_ratios.csv
+  artifact_class: validation
+  uncertainty_component: epistemic effect uncertainty
+  caption: 'VI-versus-NUTS width-ratio table: band-width ratios expose mean-field
+    limitations in epistemic effect uncertainty.'
+- output: tables/benchmark-comparator-panel__comparison.csv
+  claim_id: benchmark-comparator-panel
+  evidence_path: experiments/uci_benchmark/results/canonical
+  source_file: metrics/comparison.csv
+  artifact_class: real_data_benchmark
+  uncertainty_component: full predictive uncertainty
+  caption: 'UCI characterization table: full predictive uncertainty is scored by NLL,
+    CRPS, and calibration across the promoted canonical comparator panel.'
+- output: tables/benchmark-comparator-panel__autompg__nll.csv
+  claim_id: benchmark-comparator-panel
+  evidence_path: experiments/uci_benchmark/results/canonical
+  source_file: metrics/autompg/nll.csv
+  artifact_class: real_data_benchmark
+  uncertainty_component: full predictive uncertainty
+  caption: 'Auto MPG NLL table: full predictive uncertainty is scored on the held-out
+    UCI split.'
+- output: tables/benchmark-comparator-panel__autompg__crps.csv
+  claim_id: benchmark-comparator-panel
+  evidence_path: experiments/uci_benchmark/results/canonical
+  source_file: metrics/autompg/crps.csv
+  artifact_class: real_data_benchmark
+  uncertainty_component: full predictive uncertainty
+  caption: 'Auto MPG CRPS table: full predictive uncertainty is scored by the fair
+    sample-based CRPS route.'
+- output: tables/benchmark-comparator-panel__autompg__calibration.csv
+  claim_id: benchmark-comparator-panel
+  evidence_path: experiments/uci_benchmark/results/canonical
+  source_file: metrics/autompg/calibration.csv
+  artifact_class: real_data_benchmark
+  uncertainty_component: full predictive uncertainty
+  caption: 'Auto MPG calibration table: full predictive uncertainty is checked through
+    PIT-style calibration summaries.'
+- output: tables/benchmark-comparator-panel__autompg__variance_split.csv
+  claim_id: benchmark-comparator-panel
+  evidence_path: experiments/uci_benchmark/results/canonical
+  source_file: metrics/autompg/variance_split.csv
+  artifact_class: real_data_benchmark
+  uncertainty_component: variance split
+  caption: 'Auto MPG variance-split table: epistemic effect uncertainty and aleatoric
+    family uncertainty are summarized through the response-level variance decomposition.'
+- output: tables/benchmark-comparator-panel__naval__nll.csv
+  claim_id: benchmark-comparator-panel
+  evidence_path: experiments/uci_benchmark/results/canonical
+  source_file: metrics/naval/nll.csv
+  artifact_class: real_data_benchmark
+  uncertainty_component: full predictive uncertainty
+  caption: 'Naval NLL table: full predictive uncertainty is scored for the bounded-response
+    UCI panel member.'
+- output: tables/benchmark-comparator-panel__bike__nll.csv
+  claim_id: benchmark-comparator-panel
+  evidence_path: experiments/uci_benchmark/results/canonical
+  source_file: metrics/bike/nll.csv
+  artifact_class: real_data_benchmark
+  uncertainty_component: full predictive uncertainty
+  caption: 'Bike NLL table: full predictive uncertainty is scored for the count-data
+    UCI panel member.'

@@ -16,6 +16,13 @@ claims:
         - arrays/decomposition.npz
         - metrics/regional_components.json
         - figures/disentanglement.pdf
+      artifact_metadata:
+        figures/disentanglement.pdf:
+          uncertainty_component: variance split
+          caption: >
+            Central disentanglement figure: epistemic effect uncertainty rises
+            in sparse regions while aleatoric family uncertainty rises in noisy
+            regions, exposing the variance split.
       file_hashes:
         config.yaml: 4f8f6c71a0805bbca7485d85d4c181b0279a353cc518ef6086514380f952463f
         run.json: be93d2fc4eb5a8ed282f6e8daf27da574b4044673d78a99d0872abd1b9db0645
@@ -41,6 +48,29 @@ claims:
           - metrics/intercept_coverage.csv
           - figures/recovery.pdf
           - figures/calibration.pdf
+        artifact_metadata:
+          figures/recovery.pdf:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Normal parameter-recovery figure: centered per-feature effect
+              ribbons show epistemic effect uncertainty for distributional
+              shape functions.
+          figures/calibration.pdf:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Normal coverage figure: measured coverage summarizes the
+              epistemic effect uncertainty bands rather than asserting nominal
+              calibration.
+          metrics/calibration.csv:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Normal calibration table: measured per-parameter coverage for
+              epistemic effect uncertainty bands.
+          metrics/intercept_coverage.csv:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Normal intercept table: intercept coverage is reported separately
+              from centered epistemic effect uncertainty.
         file_hashes:
           config.yaml: 472673e0435dedc978147a8c3b056184c72145902bac9eeb61998146ec908b89
           run.json: c01aeca712ef336be28bc0249c2e3c6a4f82e38ebf32e9422fc36865a240634b
@@ -58,6 +88,29 @@ claims:
           - metrics/intercept_coverage.csv
           - figures/recovery.pdf
           - figures/calibration.pdf
+        artifact_metadata:
+          figures/recovery.pdf:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Student-t parameter-recovery figure: centered per-feature effect
+              ribbons show epistemic effect uncertainty for distributional
+              shape functions.
+          figures/calibration.pdf:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Student-t coverage figure: measured coverage summarizes the
+              epistemic effect uncertainty bands while preserving the
+              mean-field narrowness limitation.
+          metrics/calibration.csv:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Student-t calibration table: measured per-parameter coverage for
+              epistemic effect uncertainty bands.
+          metrics/intercept_coverage.csv:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Student-t intercept table: intercept coverage is reported
+              separately from centered epistemic effect uncertainty.
         file_hashes:
           config.yaml: 59985ff31b2efd0f3ebcb0a2ea0ee7b09353ad5aba4bb5423504b2a1e0d79d3e
           run.json: 0738f18e47a374bce71b7571f09dd39ca03e580509e0aaa5454e2077f5fac9f0
@@ -75,6 +128,29 @@ claims:
           - metrics/intercept_coverage.csv
           - figures/recovery.pdf
           - figures/calibration.pdf
+        artifact_metadata:
+          figures/recovery.pdf:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Gamma parameter-recovery figure: centered per-feature effect
+              ribbons show epistemic effect uncertainty for distributional
+              shape functions.
+          figures/calibration.pdf:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Gamma coverage figure: measured coverage summarizes the
+              epistemic effect uncertainty bands for positive-response
+              distributional parameters.
+          metrics/calibration.csv:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Gamma calibration table: measured per-parameter coverage for
+              epistemic effect uncertainty bands.
+          metrics/intercept_coverage.csv:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Gamma intercept table: intercept coverage is reported separately
+              from centered epistemic effect uncertainty.
         file_hashes:
           config.yaml: b7cdff0dfd769f4e8867cb99679d5d91ff9a445dc29cfd45d850f6a6b2f858a2
           run.json: 3ac8d47ecd0cfaf3be69e4d89a1de72e8f1b2fdb9b1bd299804e785b4a5a5e08
@@ -91,6 +167,23 @@ claims:
           - metrics/coverage.csv
           - metrics/intercept_coverage.csv
           - figures/effect_ribbons.pdf
+        artifact_metadata:
+          figures/effect_ribbons.pdf:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Johnson's SU showcase figure: epistemic effect uncertainty is
+              shown for location, scale, skewness, and tail-weight shape
+              functions.
+          metrics/coverage.csv:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Johnson's SU coverage table: measured per-parameter coverage for
+              epistemic effect uncertainty bands.
+          metrics/intercept_coverage.csv:
+            uncertainty_component: epistemic effect uncertainty
+            caption: >
+              Johnson's SU intercept table: intercept coverage is reported
+              separately from centered epistemic effect uncertainty.
         file_hashes:
           config.yaml: 9d6cdd93984c5fa9805d3ab71a0ad4a4048feb1336a6bdcf48982441ceaab651
           run.json: 74425de1537242ec99fa13e1bd5b986801899b519a682e10a86305fdeb3f4edc
@@ -117,6 +210,24 @@ claims:
         - metrics/parameter_intervals.csv
         - metrics/band_width_ratios.csv
         - figures/vi_vs_nuts.pdf
+      artifact_metadata:
+        figures/vi_vs_nuts.pdf:
+          uncertainty_component: epistemic effect uncertainty
+          caption: >
+            VI-versus-NUTS validation figure: epistemic effect uncertainty bands
+            are compared with validation-only NUTS to show mean-field
+            band-width limitations.
+        metrics/parameter_intervals.csv:
+          uncertainty_component: epistemic effect uncertainty
+          caption: >
+            VI-versus-NUTS interval table: parameter intervals quantify
+            epistemic effect uncertainty differences between mean-field VI and
+            validation-only NUTS.
+        metrics/band_width_ratios.csv:
+          uncertainty_component: epistemic effect uncertainty
+          caption: >
+            VI-versus-NUTS width-ratio table: band-width ratios expose
+            mean-field limitations in epistemic effect uncertainty.
       file_hashes:
         config.yaml: 4ccac5e65055e3bbd4b2c444dc619ff52c22d682cf6c2aca980bb221f7b1668b
         run.json: 64e45b4d9980fd8222201dda0881d446009742124d2d51fca14b0246566280f5
@@ -149,6 +260,44 @@ claims:
         - metrics/autompg/variance_split.csv
         - metrics/naval/nll.csv
         - metrics/bike/nll.csv
+      artifact_metadata:
+        metrics/comparison.csv:
+          uncertainty_component: full predictive uncertainty
+          caption: >
+            UCI characterization table: full predictive uncertainty is scored
+            by NLL, CRPS, and calibration across the promoted canonical
+            comparator panel.
+        metrics/autompg/nll.csv:
+          uncertainty_component: full predictive uncertainty
+          caption: >
+            Auto MPG NLL table: full predictive uncertainty is scored on the
+            held-out UCI split.
+        metrics/autompg/crps.csv:
+          uncertainty_component: full predictive uncertainty
+          caption: >
+            Auto MPG CRPS table: full predictive uncertainty is scored by the
+            fair sample-based CRPS route.
+        metrics/autompg/calibration.csv:
+          uncertainty_component: full predictive uncertainty
+          caption: >
+            Auto MPG calibration table: full predictive uncertainty is checked
+            through PIT-style calibration summaries.
+        metrics/autompg/variance_split.csv:
+          uncertainty_component: variance split
+          caption: >
+            Auto MPG variance-split table: epistemic effect uncertainty and
+            aleatoric family uncertainty are summarized through the
+            response-level variance decomposition.
+        metrics/naval/nll.csv:
+          uncertainty_component: full predictive uncertainty
+          caption: >
+            Naval NLL table: full predictive uncertainty is scored for the
+            bounded-response UCI panel member.
+        metrics/bike/nll.csv:
+          uncertainty_component: full predictive uncertainty
+          caption: >
+            Bike NLL table: full predictive uncertainty is scored for the
+            count-data UCI panel member.
       file_hashes:
         README.md: b63bbec80efdbe8d7ad417467c63e40c37e3905ee005a07dbe45058783cafb4b
         benchmark-claims.yaml: ee5b2266fb5d6a634cf738b1fb2060da8c13fe443259fb5df204eda0af8f9544

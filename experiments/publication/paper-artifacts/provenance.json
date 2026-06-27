@@ -1,0 +1,85 @@
+{
+  "builder_version": "0.1.0.dev0",
+  "generated_at": "2026-06-27T09:43:43+00:00",
+  "inputs": [
+    {
+      "artifact_class": "simulation",
+      "claim_id": "central-disentanglement",
+      "path": "experiments/disentanglement/results/canonical",
+      "run_metadata": {
+        "experiment": "disentanglement",
+        "seed": 9901,
+        "smoke": false
+      }
+    },
+    {
+      "artifact_class": "simulation",
+      "claim_id": "per-feature-per-parameter-epistemic-bands",
+      "path": "experiments/parameter_recovery/results/canonical-normal",
+      "run_metadata": {
+        "experiment": "parameter_recovery_normal",
+        "seed": 9801,
+        "smoke": false
+      }
+    },
+    {
+      "artifact_class": "simulation",
+      "claim_id": "per-feature-per-parameter-epistemic-bands",
+      "path": "experiments/parameter_recovery/results/canonical-student-t",
+      "run_metadata": {
+        "experiment": "parameter_recovery_student_t",
+        "seed": 9802,
+        "smoke": false
+      }
+    },
+    {
+      "artifact_class": "simulation",
+      "claim_id": "per-feature-per-parameter-epistemic-bands",
+      "path": "experiments/parameter_recovery/results/canonical-gamma",
+      "run_metadata": {
+        "experiment": "parameter_recovery_gamma",
+        "seed": 9803,
+        "smoke": false
+      }
+    },
+    {
+      "artifact_class": "simulation",
+      "claim_id": "per-feature-per-parameter-epistemic-bands",
+      "path": "experiments/jsu_showcase/results/canonical",
+      "run_metadata": {
+        "experiment": "jsu_showcase",
+        "seed": 10001,
+        "smoke": false
+      }
+    },
+    {
+      "artifact_class": "validation",
+      "claim_id": "vi-vs-nuts-limitation",
+      "path": "experiments/hmc_agreement/results/canonical",
+      "run_metadata": {
+        "experiment": "hmc_agreement",
+        "nuts": {
+          "chains": 4,
+          "divergences": 0,
+          "ess_bulk_min": 1330.4240579230996,
+          "r_hat_max": 1.0037415328129553,
+          "samples_per_chain": 750,
+          "warmup": 750
+        },
+        "seed": 101,
+        "smoke": false
+      }
+    },
+    {
+      "artifact_class": "real_data_benchmark",
+      "claim_id": "benchmark-comparator-panel",
+      "path": "experiments/uci_benchmark/results/canonical",
+      "run_metadata": {
+        "experiment": "uci_benchmark",
+        "seed": 102,
+        "smoke": false
+      }
+    }
+  ],
+  "manifest": "experiments/publication/evidence-manifest.yaml"
+}

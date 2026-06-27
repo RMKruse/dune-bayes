@@ -1,4 +1,4 @@
-"""Paper artifact builder for promoted evidence (PRD-0003, GitHub #132)."""
+"""Paper artifact builder for promoted evidence (PRD-0003, GitHub #132/#146)."""
 
 from __future__ import annotations
 
@@ -81,6 +81,8 @@ def build_paper_artifacts(
         entries=entries,
         base=base,
     )
+    artifact_metadata = destination / "artifact-metadata.yaml"
+    _write_artifact_metadata(artifact_metadata, entries=entries)
     appendix = destination / "reviewer-evidence-appendix.md"
     _write_reviewer_appendix(
         appendix,
@@ -90,7 +92,14 @@ def build_paper_artifacts(
     return ArtifactBuildReport(
         ready=True,
         failures=(),
-        outputs=(*figure_outputs, *table_outputs, summary_table, provenance, appendix),
+        outputs=(
+            *figure_outputs,
+            *table_outputs,
+            summary_table,
+            provenance,
+            artifact_metadata,
+            appendix,
+        ),
     )
 
 
@@ -222,8 +231,10 @@ def _declared_files(
             records.append(
                 {
                     "claim_id": str(claim.get("id", "<missing id>")),
+                    "artifact_class": str(evidence.get("artifact_class", "")),
                     "evidence_path": Path(str(evidence.get("path", ""))),
                     "relative": relative,
+                    "artifact_metadata": evidence.get("artifact_metadata", {}),
                 }
             )
     return tuple(records)
@@ -263,6 +274,12 @@ def _stable_output_name(
 
 def _default_output_name(record: dict[str, Any]) -> str:
     """Return the stable default claim-prefixed filename."""
+    relative_parent = record["relative"].parts[1:-1]
+    if relative_parent:
+        return (
+            f"{record['claim_id']}__{_slug('__'.join(relative_parent))}__"
+            f"{record['relative'].name}"
+        )
     return f"{record['claim_id']}__{record['relative'].name}"
 
 
@@ -343,6 +360,19 @@ def _write_provenance(
         ],
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", "utf-8")
+
+
+def _write_artifact_metadata(
+    path: Path,
+    *,
+    entries: tuple[dict[str, Any], ...],
+) -> None:
+    """Write manuscript-facing captions and uncertainty-component labels."""
+    payload = {
+        "version": 1,
+        "artifacts": list(_artifact_metadata_records(entries)),
+    }
+    path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
 
 
 def _write_reviewer_appendix(
@@ -470,6 +500,26 @@ def _artifact_output_records(
     )
 
 
+def _artifact_metadata_records(
+    entries: tuple[dict[str, Any], ...],
+) -> tuple[dict[str, str], ...]:
+    """Return metadata rows for copied manuscript artifacts."""
+    return (
+        *_declared_metadata_records(
+            entries,
+            parent="figures",
+            output_parent="figures",
+            suffixes=None,
+        ),
+        *_declared_metadata_records(
+            entries,
+            parent="metrics",
+            output_parent="tables",
+            suffixes={".csv"},
+        ),
+    )
+
+
 def _declared_output_records(
     entries: tuple[dict[str, Any], ...],
     *,
@@ -492,6 +542,43 @@ def _declared_output_records(
             }
         )
     return tuple(output_records)
+
+
+def _declared_metadata_records(
+    entries: tuple[dict[str, Any], ...],
+    *,
+    parent: str,
+    output_parent: str,
+    suffixes: set[str] | None,
+) -> tuple[dict[str, str], ...]:
+    """Return artifact metadata using the copied-output naming rules."""
+    records = _declared_files(entries, parent=parent, suffixes=suffixes)
+    counts = _candidate_counts(records)
+    used: set[str] = set()
+    metadata_records: list[dict[str, str]] = []
+    for record in records:
+        relative = str(record["relative"])
+        output_name = _stable_output_name(record, counts=counts, used=used)
+        manifest_metadata = record["artifact_metadata"]
+        metadata = (
+            manifest_metadata.get(relative, {})
+            if isinstance(manifest_metadata, dict)
+            else {}
+        )
+        metadata_records.append(
+            {
+                "output": f"{output_parent}/{output_name}",
+                "claim_id": str(record["claim_id"]),
+                "evidence_path": str(record["evidence_path"]),
+                "source_file": relative,
+                "artifact_class": str(record["artifact_class"]),
+                "uncertainty_component": str(
+                    metadata.get("uncertainty_component", "")
+                ).strip(),
+                "caption": str(metadata.get("caption", "")).strip(),
+            }
+        )
+    return tuple(metadata_records)
 
 
 def _read_json(path: Path) -> dict[str, Any]:

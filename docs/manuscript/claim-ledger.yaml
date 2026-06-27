@@ -32,13 +32,20 @@ claims:
         promoted_artifact: experiments/jsu_showcase/results/canonical
     intended_outputs:
       - figures/per-feature-per-parameter-epistemic-bands__canonical-normal__recovery.pdf
+      - figures/per-feature-per-parameter-epistemic-bands__canonical-normal__calibration.pdf
       - figures/per-feature-per-parameter-epistemic-bands__canonical-student-t__recovery.pdf
+      - figures/per-feature-per-parameter-epistemic-bands__canonical-student-t__calibration.pdf
       - figures/per-feature-per-parameter-epistemic-bands__canonical-gamma__recovery.pdf
+      - figures/per-feature-per-parameter-epistemic-bands__canonical-gamma__calibration.pdf
       - figures/per-feature-per-parameter-epistemic-bands__effect_ribbons.pdf
       - tables/per-feature-per-parameter-epistemic-bands__canonical-normal__calibration.csv
+      - tables/per-feature-per-parameter-epistemic-bands__canonical-normal__intercept_coverage.csv
       - tables/per-feature-per-parameter-epistemic-bands__canonical-student-t__calibration.csv
+      - tables/per-feature-per-parameter-epistemic-bands__canonical-student-t__intercept_coverage.csv
       - tables/per-feature-per-parameter-epistemic-bands__canonical-gamma__calibration.csv
+      - tables/per-feature-per-parameter-epistemic-bands__canonical-gamma__intercept_coverage.csv
       - tables/per-feature-per-parameter-epistemic-bands__coverage.csv
+      - tables/per-feature-per-parameter-epistemic-bands__canonical__intercept_coverage.csv
     limitation_note: >
       Coverage is measured rather than asserted; centered effect recovery and
       separate intercept coverage are required because additive shape functions
@@ -73,6 +80,8 @@ claims:
       - tables/benchmark-comparator-panel__autompg__crps.csv
       - tables/benchmark-comparator-panel__autompg__calibration.csv
       - tables/benchmark-comparator-panel__autompg__variance_split.csv
+      - tables/benchmark-comparator-panel__naval__nll.csv
+      - tables/benchmark-comparator-panel__bike__nll.csv
     limitation_note: >
       Benchmark evidence is empirical characterization and comparator context;
       optional NAMLSS, LA-NAM, and BAMLSS gaps remain documented exclusions

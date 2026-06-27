@@ -12,6 +12,9 @@ import yaml
 from experiments.publication.artifacts import build_paper_artifacts
 
 README = Path("experiments/README.md")
+MANIFEST = Path("experiments/publication/evidence-manifest.yaml")
+CLAIM_LEDGER = Path("docs/manuscript/claim-ledger.yaml")
+PAPER_ARTIFACTS = Path("experiments/publication/paper-artifacts")
 
 
 def _write_json(path: Path, payload: object) -> None:
@@ -91,6 +94,7 @@ def test_builder_writes_stable_artifact_paths_and_provenance(
         output_dir / "figures" / "central-disentanglement__disentanglement.pdf",
         output_dir / "tables" / "evidence-summary.csv",
         output_dir / "provenance.json",
+        output_dir / "artifact-metadata.yaml",
         output_dir / "reviewer-evidence-appendix.md",
     )
     assert (
@@ -133,6 +137,52 @@ def test_builder_writes_reviewer_appendix_from_promoted_evidence(
     assert "simulation" in text
     assert "experiments/disentanglement/results/canonical" in text
     assert "figures/central-disentanglement__disentanglement.pdf" in text
+
+
+def test_builder_writes_artifact_metadata_with_uncertainty_components(
+    tmp_path: Path,
+) -> None:
+    """Paper artifacts carry caption metadata naming the uncertainty component."""
+    _write_promoted_result(tmp_path)
+    manifest_path = _write_manifest(tmp_path)
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    manifest["claims"][0]["evidence"]["artifact_metadata"] = {
+        "figures/disentanglement.pdf": {
+            "caption": (
+                "Central variance split: epistemic effect uncertainty rises in "
+                "the sparse region while aleatoric family uncertainty rises in "
+                "the noisy region."
+            ),
+            "uncertainty_component": "variance split",
+        }
+    }
+    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), "utf-8")
+    output_dir = tmp_path / "paper"
+
+    report = build_paper_artifacts(manifest_path, output_dir=output_dir, root=tmp_path)
+
+    metadata_path = output_dir / "artifact-metadata.yaml"
+    assert report.ready is True
+    assert metadata_path in report.outputs
+    metadata = yaml.safe_load(metadata_path.read_text("utf-8"))
+    assert metadata == {
+        "version": 1,
+        "artifacts": [
+            {
+                "output": "figures/central-disentanglement__disentanglement.pdf",
+                "claim_id": "central-disentanglement",
+                "evidence_path": "experiments/disentanglement/results/canonical",
+                "source_file": "figures/disentanglement.pdf",
+                "artifact_class": "simulation",
+                "uncertainty_component": "variance split",
+                "caption": (
+                    "Central variance split: epistemic effect uncertainty rises in "
+                    "the sparse region while aleatoric family uncertainty rises in "
+                    "the noisy region."
+                ),
+            }
+        ],
+    }
 
 
 def test_reviewer_appendix_separates_simulation_and_real_data_evidence(
@@ -400,6 +450,69 @@ def test_builder_disambiguates_repeated_declared_table_basenames(
     ].split(f"- Promoted evidence: {path_b}", maxsplit=1)[0]
     assert "benchmark-comparator-panel__canonical-a__comparison.csv" in path_a_block
     assert "benchmark-comparator-panel__canonical-b__comparison.csv" not in path_a_block
+
+
+def test_checked_in_paper_artifact_set_covers_manuscript_claims(
+    tmp_path: Path,
+) -> None:
+    """The committed manuscript bundle matches promoted evidence outputs."""
+    rebuilt_dir = tmp_path / "rebuilt-paper-artifacts"
+
+    report = build_paper_artifacts(MANIFEST, output_dir=rebuilt_dir, root=Path("."))
+
+    assert report.ready is True
+    assert PAPER_ARTIFACTS.is_dir()
+    generated_outputs = {
+        str(output.relative_to(rebuilt_dir)) for output in report.outputs
+    }
+    committed_outputs = {
+        str(output.relative_to(PAPER_ARTIFACTS))
+        for output in PAPER_ARTIFACTS.rglob("*")
+        if output.is_file()
+    }
+    assert committed_outputs == generated_outputs
+
+    ledger = yaml.safe_load(CLAIM_LEDGER.read_text(encoding="utf-8"))
+    intended_outputs = {
+        output
+        for claim in ledger["claims"]
+        for output in claim.get("intended_outputs", [])
+    }
+    metadata = yaml.safe_load(
+        (PAPER_ARTIFACTS / "artifact-metadata.yaml").read_text("utf-8")
+    )
+    artifact_rows = {row["output"]: row for row in metadata["artifacts"]}
+    assert intended_outputs <= artifact_rows.keys()
+
+    allowed_components = {
+        "epistemic effect uncertainty",
+        "aleatoric family uncertainty",
+        "full predictive uncertainty",
+        "variance split",
+    }
+    assert {
+        row["uncertainty_component"] for row in artifact_rows.values()
+    } <= allowed_components
+    assert any(
+        "epistemic effect uncertainty" in row["caption"]
+        for row in artifact_rows.values()
+    )
+    assert any(
+        "aleatoric family uncertainty" in row["caption"]
+        for row in artifact_rows.values()
+    )
+    assert (
+        artifact_rows["figures/central-disentanglement__disentanglement.pdf"][
+            "uncertainty_component"
+        ]
+        == "variance split"
+    )
+    assert (
+        artifact_rows["tables/benchmark-comparator-panel__comparison.csv"][
+            "uncertainty_component"
+        ]
+        == "full predictive uncertainty"
+    )
 
 
 def test_cli_builds_paper_artifacts_from_manifest(tmp_path: Path) -> None:
