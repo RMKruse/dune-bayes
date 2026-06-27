@@ -195,3 +195,35 @@ def test_manuscript_scaffold_names_sections_and_uncertainty_terms() -> None:
         assert term in text
     for adr in ["ADR-0001", "ADR-0003", "ADR-0006", "ADR-0007", "ADR-0008"]:
         assert adr in text
+
+
+def test_methods_section_covers_adr_backed_math_contract() -> None:
+    """The methods narrative covers the math and exclusions required by #144."""
+    methods = _section(
+        MANUSCRIPT.read_text(encoding="utf-8"),
+        "## Model And Methods",
+        "## Experiments",
+    ).lower()
+
+    concept_groups = [
+        ("bayesiannamlss", "namlss", "shape function", "family parameter"),
+        ("negative elbo", "kl/n", "mean-field", "prior"),
+        ("local reparameterization", "coherent global", "posterior weight"),
+        ("posterior predictive mixture", "epistemic", "aleatoric"),
+        ("law of total variance", "variance decomposition"),
+        ("effect ribbons", "response-level bands", "effect centering"),
+        ("intercept coverage", "epistemic-only", "full predictive"),
+        ("softplus(x) + eps", "numerical floor", "family parameterizations"),
+        ("waic", "psis-loo", "crps", "pit", "coverage"),
+        ("no bayes factors", "literal bayes factors"),
+    ]
+
+    missing = [
+        token for group in concept_groups for token in group if token not in methods
+    ]
+    assert missing == []
+
+
+def _section(text: str, start: str, end: str) -> str:
+    """Return a Markdown section bounded by two headings."""
+    return text.split(start, maxsplit=1)[1].split(end, maxsplit=1)[0]

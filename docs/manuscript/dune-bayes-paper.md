@@ -34,26 +34,136 @@ predictive scoring from DUNE's main uncertainty-structure contribution.
 
 ## Model And Methods
 
-The model is the package's `BayesianNAMLSS`: an additive distributional model
-whose shape function terms contribute to every response-family parameter. The
-paper should reuse the project vocabulary directly: a shape function is the
-per-feature or interaction network, epistemic uncertainty is uncertainty over
-its learned effect, aleatoric uncertainty is family variance, and variance
-decomposition is computed from posterior predictive draws.
+### Bayesian Distributional Additive Model
 
-Methods terminology is ADR-backed. Mean-field VI is the v1 inference engine
-(ADR-0001), per-feature prior scales act as smoothness controls (ADR-0002),
-posterior predictive sampling and WAIC/PSIS-LOO follow the comparison
-architecture in ADR-0003, `VariationalDense` is the in-house variational atom
-(ADR-0004), the runtime backend is PyTorch with JAX/NumPyro deferred behind the
-future seam (ADR-0006), and training uses local reparameterization while
-posterior sampling uses coherent global weight draws (ADR-0007).
+DUNE fits the package's `BayesianNAMLSS`, a Bayesian distributional extension of
+NAMLSS. For observations `(x_i, y_i)`, a response family `F` supplies `K` family
+parameters, and each additive term is a shape function that contributes to every
+family parameter. The runtime implementation is PyTorch, with the deferred
+JAX/NumPyro MCMC seam kept outside the v1 package backend (ADR-0006). On the
+predictor scale,
 
-Numerical stability should be described as part of the method, not as an
-implementation footnote. Family scale and variance links use `softplus(x) +
-EPS`, log-likelihood and information-criterion accumulation stay in log-space,
-and finite extreme pre-link checks are part of the reproducibility contract
-recorded in ADR-0008 and the project numerical rules.
+```text
+eta_{ik}(theta) = alpha_k(theta) + sum_{m=1}^M f_{mk}(x_{im}; theta_m),
+    k = 1, ..., K,
+y_i | theta ~ F(eta_i(theta)).
+```
+
+Here `f_m` may be a single-feature shape function, an interaction shape function
+over several inputs, or a categorical effect. Bayesian shape functions replace
+deterministic weights with variational weights, so epistemic uncertainty is
+uncertainty over the learned shape effects and intercept, while aleatoric
+uncertainty remains the variance implied by the response family.
+
+### Mean-Field Variational Objective
+
+The v1 inference engine is mean-field variational inference (ADR-0001). Each
+`VariationalDense` weight or bias has a Normal variational factor,
+
+```text
+q_phi(theta) = product_l Normal(mu_l, softplus(rho_l)^2),
+```
+
+and the corresponding prior term is a serializable Gaussian prior, optionally
+with a per-feature prior-scale handle (ADR-0002 and ADR-0004). The negative ELBO
+optimized during training is
+
+```text
+L(phi) =
+    (1 / |B|) sum_{i in B} -log p_F(y_i | eta_i(theta_phi))
+    + beta / N * KL(q_phi(theta) || p(theta)).
+```
+
+`N` is the full training-set size, not the minibatch size, so the KL/N scaling is
+stable under minibatching. `beta` is the KL warm-up factor used during early
+epochs; after warm-up the objective is the usual negative ELBO with the
+mean-field posterior and prior terms above.
+
+### Training Draws Versus Posterior Draws
+
+Training uses local reparameterization (ADR-0007): for a variational dense
+layer, the minibatch pre-activation is sampled from its marginal Normal
+distribution using per-row noise. This reduces ELBO-gradient variance, but it
+does not materialize a single weight matrix shared across the data.
+
+Posterior predictive, effect, and log-likelihood sampling therefore use
+coherent global posterior weight draws instead. For draw `t`, one global
+`theta^(t) ~ q_phi(theta)` is applied to all observations, all feature shape
+functions, and all family parameters before the next draw is taken. This
+coherence is required for smooth effect draws and for the epistemic/aleatoric
+interpretation of the posterior predictive mixture.
+
+### Posterior Predictive Mixture And Variance Decomposition
+
+For `T` coherent posterior draws, DUNE represents the posterior predictive as a
+uniform mixture of family distributions,
+
+```text
+p(y_i | D) ~= (1 / T) sum_{t=1}^T p_F(y_i | eta_i(theta^(t))).
+```
+
+Spread across mixture components is epistemic uncertainty because it comes from
+different posterior weight draws. Spread within each component is aleatoric
+uncertainty because it is the response-family variance conditional on one draw.
+The paper's uncertainty-disentanglement metric is the law of total variance:
+
+```text
+Var(y_i | D)
+  ~= E_t[ Var_F(y_i | theta^(t)) ]
+     + Var_t[ E_F(y_i | theta^(t)) ].
+```
+
+The first term is the aleatoric component and the second is the epistemic
+component. The implementation computes this variance decomposition from each
+draw's family mean and family variance, surfacing infinite family variance as
+infinite rather than clamping it.
+
+### Effect Ribbons And Response-Level Bands
+
+Effect ribbons summarize posterior draws of a single shape function for one
+family parameter. Each draw is centered over the plotting data before quantiles
+are taken, so effect centering removes arbitrary additive level and leaves an
+epistemic-only ribbon around the shape. Because centering moves level
+uncertainty into the additive anchor, intercept coverage is assessed separately
+in simulation evidence.
+
+Response-level bands answer a different question. They are full predictive
+intervals drawn from the posterior predictive mixture, so they include both
+epistemic spread across posterior components and aleatoric spread within each
+family component. Aleatoric response noise is deliberately not attributed to
+individual feature curves.
+
+### Families And Numerical Stability
+
+Family parameterizations follow the package contract: Normal, Gamma, Student-t,
+Johnson's SU, Negative Binomial, and Beta families expose a fixed
+`param_count`, predictor-to-parameter links, `log_prob`, and defined mean and
+variance behavior for the decomposition. Positive scale, rate, concentration,
+and dispersion parameters use `softplus(x) + EPS`; the additive `EPS` is the
+numerical floor that prevents bare softplus underflow at extreme negative
+pre-link values. The method does not use `exp`, positive `transform_to`, or
+post-hoc clamps for learned positive quantities.
+
+All likelihood and information-criterion accumulation stays in log-space:
+training uses `log_prob`, WAIC uses `logsumexp` across posterior draws, and
+pointwise log-likelihood matrices are accumulated in float64 for evaluation.
+Finite extreme pre-link checks at `+/-1e4` are part of the documented numerical
+contract (ADR-0008).
+
+### Evaluation And Exclusions
+
+Model comparison is predictive and posterior-simulation based (ADR-0003). WAIC
+uses the WAIC2 expected log pointwise predictive density with log-space
+accumulation; PSIS-LOO is computed through ArviZ and reports Pareto-`k`
+reliability diagnostics; `compare()` ranks candidate formulas by the LOO result.
+CRPS scores predictive samples, PIT calibration evaluates predictive CDF values
+(with randomized PIT for discrete responses when requested), and coverage
+reports central credible-band coverage for effect or parameter draws in the
+simulation studies.
+
+The ELBO is retained only as a biased secondary evidence proxy. The paper computes
+no Bayes factors: literal Bayes factors would require tractable marginal
+likelihood estimates that are out of scope for the v1 mean-field neural model.
 
 ## Experiments
 
