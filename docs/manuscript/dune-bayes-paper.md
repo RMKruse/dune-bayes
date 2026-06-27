@@ -31,6 +31,8 @@ Comparator language should follow the publication evidence manifest: NAMpy
 NAMLSS, LA-NAM, and BAMLSS are external comparators or documented exclusions,
 not runtime dependencies. The benchmark discussion should distinguish
 predictive scoring from DUNE's main uncertainty-structure contribution.
+The comparator-scope decision for first submission is recorded in
+`docs/manuscript/comparator-scope-decision.md`.
 
 ## Model And Methods
 
@@ -75,6 +77,12 @@ Planned manuscript outputs:
 Every number, figure, or table should be generated from promoted artifacts under
 `experiments/*/results/canonical` through the paper artifact builder, never from
 `experiments/*/runs` scratch output.
+
+For the first submission, the UCI table should use characterization language:
+DUNE is evaluated against the promoted canonical comparators on predictive fit,
+calibration, and uncertainty decomposition, while NAMpy/NAMLSS, LA-NAM, and
+BAMLSS/R remain documented exclusions rather than promoted canonical evidence.
+This wording is scoped by the comparator-scope decision record.
 
 ## Limitations
 

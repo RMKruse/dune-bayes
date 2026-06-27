@@ -1,5 +1,6 @@
 version: 1
 manuscript: docs/manuscript/dune-bayes-paper.md
+comparator_scope_decision: docs/manuscript/comparator-scope-decision.md
 evidence_manifest: experiments/publication/evidence-manifest.yaml
 claims:
   - id: central-disentanglement
@@ -62,8 +63,10 @@ claims:
   - id: benchmark-comparator-panel
     paper_claim: >
       Real-data UCI results characterize DUNE against the promoted canonical
-      panel and explicit optional-comparator exclusions, without claiming
-      universal predictive dominance.
+      panel of dune-bayes, BayesNAM-style, plain MLP, and deep ensemble
+      comparators; optional external NAMLSS, LA-NAM, and BAMLSS/R comparators
+      remain documented exclusions, and the paper does not claim universal
+      predictive dominance.
     evidence:
       - evidence_class: real_data_benchmark
         promoted_artifact: experiments/uci_benchmark/results/canonical
@@ -74,6 +77,6 @@ claims:
       - tables/benchmark-comparator-panel__autompg__calibration.csv
       - tables/benchmark-comparator-panel__autompg__variance_split.csv
     limitation_note: >
-      Benchmark evidence is empirical characterization and comparator context;
-      optional NAMLSS, LA-NAM, and BAMLSS gaps remain documented exclusions
-      unless full canonical evidence is later promoted.
+      Benchmark evidence is empirical characterization and comparator context.
+      The UCI panel remains characterization evidence unless promoted results
+      are later expanded and re-gated to support a stronger predictive claim.

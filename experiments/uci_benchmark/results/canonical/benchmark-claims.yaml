@@ -22,6 +22,44 @@ claims:
       - lanam
       - bamlss_reference
     metrics: [nll, crps, calibration]
+    scope_decision:
+      record: docs/manuscript/comparator-scope-decision.md
+      decision: narrow_to_canonical_panel_with_exclusions
+      uci_panel_role: characterization_evidence
+      full_external_comparator_followups: []
+      manuscript_claim_wording: >
+        On a ten-dataset UCI characterization panel, DUNE is evaluated against
+        the promoted canonical comparators: dune-bayes, BayesNAM-style,
+        plain MLP, and deep ensemble. These results characterize predictive
+        fit, calibration, and uncertainty decomposition under a shared scoring
+        harness; they are not a claim of universal predictive dominance.
+        External NAMpy/NAMLSS, LA-NAM, and BAMLSS/R comparators are documented
+        exclusions for this submission rather than promoted canonical evidence.
+      runtime_boundary: >
+        TensorFlow-era NAMLSS, LA-NAM, BAMLSS/R, JAX, and NumPyro remain outside
+        package runtime dependencies; they are experiments-only, optional
+        external-comparator, or future-backend concerns.
+      excluded_external_comparators:
+        - baseline: nampy_namlss
+          manuscript_name: NAMpy/NAMLSS
+          reason: >
+            The optional TensorFlow-era NAMpy/NAMLSS environment remains outside
+            the PyTorch package runtime. The promoted NAMLSS smoke tracer covers
+            the live process boundary, but smoke evidence is not cited as a
+            paper benchmark result.
+        - baseline: lanam
+          manuscript_name: LA-NAM
+          reason: >
+            The optional LA-NAM third-party environment was not enabled for the
+            canonical run. Dependency instructions remain documented for future
+            reruns, but the first submission does not cite LA-NAM scores.
+        - baseline: bamlss_reference
+          manuscript_name: BAMLSS/R
+          reason: >
+            Maintainer-produced BAMLSS/R fixtures are not available for the full
+            ten-dataset panel. The committed Auto MPG fixture keeps the scoring
+            seam tested, but it is not generalized into a paper-wide BAMLSS/R
+            comparison.
     exclusions:
       - &nampy_autompg
         dataset: autompg
