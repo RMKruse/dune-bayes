@@ -229,16 +229,28 @@ Every number, figure, or table should be generated from promoted artifacts under
 
 ## Limitations
 
-The paper should be explicit that mean-field VI can under-cover posterior
-uncertainty; the validation-only NUTS study quantifies this limitation but does
-not make NUTS a shipped inference backend. The benchmark panel characterizes
-real-data behavior and comparator context, but it should not claim universal
-predictive dominance unless the promoted table supports that claim.
+Mean-field VI can under-cover posterior uncertainty. The validation-only NUTS
+study in `experiments/hmc_agreement/results/canonical` quantifies narrowness and
+band-width limitations with promoted VI-versus-NUTS evidence. HMC/NUTS is not a
+shipped package backend; JAX/NumPyro remains the deferred validation and
+future-inference seam, not part of the v1 runtime API.
 
-Other limitations to keep visible: no Bayes factors, no post-hoc recalibration
-or band inflation, no runtime TensorFlow dependency, no shipped HMC backend, and
-optional external comparator gaps documented as exclusions when canonical
-evidence is not promoted.
+Coverage is measured and reported, not asserted nominally correct. The paper
+therefore reports effect-band and response-band calibration summaries as
+evidence, while preserving the limitation that mean-field credible bands may be
+too narrow. It applies no post-hoc band inflation, conformal calibration, or
+recalibration to make intervals appear nominal after the fact.
+
+Model comparison is deliberately predictive rather than marginal-likelihood
+based. WAIC and PSIS-LOO are the documented comparison tools, and the ELBO is a
+biased secondary evidence proxy. Literal Bayes factors are out of scope because
+the neural marginal likelihood is not tractably estimated in this package.
+
+The benchmark panel characterizes real-data behavior and comparator context, but
+it should not claim universal predictive dominance unless promoted evidence
+supports that claim. Other scope boundaries remain explicit: no runtime
+TensorFlow dependency, no shipped HMC backend, and optional external comparator
+gaps documented as exclusions when canonical evidence is not promoted.
 
 ## Reproducibility
 

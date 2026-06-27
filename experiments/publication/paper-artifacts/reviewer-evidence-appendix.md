@@ -8,7 +8,10 @@ This appendix is generated from the promoted publication evidence manifest.
 - response-level predictive bands combine epistemic + aleatoric uncertainty and are interpreted as prediction intervals.
 - centered effect recovery is evaluated against centered posterior draws because additive shape functions are identified only up to level; intercept coverage is reported separately.
 - Simulation coverage is measured and reported rather than asserted correct, preserving the mean-field VI narrowness limitation in ADR-0001.
-- VI-vs-NUTS evidence is validation-only NUTS evidence from experiments/. dune-bayes does not ship an MCMC backend; ADR-0006 keeps JAX/NumPyro behind a future inference seam.
+- VI-vs-NUTS evidence is validation-only NUTS evidence from experiments/. HMC/NUTS is not a shipped package backend; dune-bayes does not ship an MCMC backend; ADR-0006 keeps JAX/NumPyro behind a future inference seam.
+- WAIC and PSIS-LOO are the documented comparison tools, while ELBO is a biased secondary evidence proxy; literal Bayes factors are out of scope.
+- The paper applies no post-hoc band inflation, conformal calibration, or recalibration to the reported credible or predictive bands.
+- The bounded audit regenerates smoke outputs and paper artifacts only. Full canonical experiment reruns are manual. Promoted canonical evidence remains the reviewed source for paper claims.
 - Family parameterizations follow the package glossary: positivity uses softplus(x) + EPS, and Johnson's SU uses the scipy johnsonsu parameterization.
 
 ## Simulation Evidence
