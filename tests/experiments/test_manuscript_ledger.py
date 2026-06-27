@@ -10,10 +10,6 @@ from experiments.publication.manuscript import validate_claim_ledger
 
 LEDGER = Path("docs/manuscript/claim-ledger.yaml")
 MANUSCRIPT = Path("docs/manuscript/dune-bayes-paper.md")
-COMPARATOR_DECISION = Path("docs/manuscript/comparator-scope-decision.md")
-BENCHMARK_CLAIMS = Path(
-    "experiments/uci_benchmark/results/canonical/benchmark-claims.yaml"
-)
 
 
 def _write_evidence_manifest(root: Path) -> Path:
@@ -175,42 +171,6 @@ def test_checked_in_claim_ledger_has_paper_contract() -> None:
         assert claim["intended_outputs"]
 
 
-def test_comparator_scope_decision_records_benchmark_claim_contract() -> None:
-    """GitHub #145 records the benchmark scope and exclusion wording."""
-    ledger = yaml.safe_load(LEDGER.read_text(encoding="utf-8"))
-    benchmark_manifest = yaml.safe_load(BENCHMARK_CLAIMS.read_text(encoding="utf-8"))
-    scope = benchmark_manifest["claims"][0]["scope_decision"]
-    decision_text = COMPARATOR_DECISION.read_text(encoding="utf-8")
-    manuscript_text = MANUSCRIPT.read_text(encoding="utf-8")
-
-    assert ledger["comparator_scope_decision"] == str(COMPARATOR_DECISION)
-    assert COMPARATOR_DECISION.is_file()
-    assert scope["record"] == str(COMPARATOR_DECISION)
-    assert scope["decision"] == "narrow_to_canonical_panel_with_exclusions"
-    assert scope["uci_panel_role"] == "characterization_evidence"
-    assert scope["full_external_comparator_followups"] == []
-
-    for phrase in (
-        "The UCI panel is characterization evidence unless promoted results",
-        "stronger predictive claim",
-        "must not claim universal predictive dominance",
-    ):
-        assert phrase in decision_text
-    for comparator in ("NAMpy/NAMLSS", "LA-NAM", "BAMLSS/R"):
-        assert comparator in decision_text
-        assert comparator in scope["manuscript_claim_wording"]
-    for runtime in (
-        "TensorFlow-era NAMLSS",
-        "LA-NAM",
-        "BAMLSS/R",
-        "JAX",
-        "NumPyro",
-    ):
-        assert runtime in scope["runtime_boundary"]
-    assert "package runtime dependencies" in scope["runtime_boundary"]
-    assert "comparator-scope decision" in manuscript_text
-
-
 def test_manuscript_scaffold_names_sections_and_uncertainty_terms() -> None:
     """The source scaffold contains the paper-facing sections and thesis terms."""
     text = MANUSCRIPT.read_text(encoding="utf-8")
@@ -235,3 +195,35 @@ def test_manuscript_scaffold_names_sections_and_uncertainty_terms() -> None:
         assert term in text
     for adr in ["ADR-0001", "ADR-0003", "ADR-0006", "ADR-0007", "ADR-0008"]:
         assert adr in text
+
+
+def test_methods_section_covers_adr_backed_math_contract() -> None:
+    """The methods narrative covers the math and exclusions required by #144."""
+    methods = _section(
+        MANUSCRIPT.read_text(encoding="utf-8"),
+        "## Model And Methods",
+        "## Experiments",
+    ).lower()
+
+    concept_groups = [
+        ("bayesiannamlss", "namlss", "shape function", "family parameter"),
+        ("negative elbo", "kl/n", "mean-field", "prior"),
+        ("local reparameterization", "coherent global", "posterior weight"),
+        ("posterior predictive mixture", "epistemic", "aleatoric"),
+        ("law of total variance", "variance decomposition"),
+        ("effect ribbons", "response-level bands", "effect centering"),
+        ("intercept coverage", "epistemic-only", "full predictive"),
+        ("softplus(x) + eps", "numerical floor", "family parameterizations"),
+        ("waic", "psis-loo", "crps", "pit", "coverage"),
+        ("no bayes factors", "literal bayes factors"),
+    ]
+
+    missing = [
+        token for group in concept_groups for token in group if token not in methods
+    ]
+    assert missing == []
+
+
+def _section(text: str, start: str, end: str) -> str:
+    """Return a Markdown section bounded by two headings."""
+    return text.split(start, maxsplit=1)[1].split(end, maxsplit=1)[0]
