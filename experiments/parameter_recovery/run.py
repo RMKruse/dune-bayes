@@ -62,6 +62,14 @@ def _family(family_name: str) -> NormalFamily | StudentTFamily | GammaFamily:
     raise ValueError(f"unsupported family: {family_name}")
 
 
+def _configured_prior_scale(architecture: Mapping[str, Any]) -> float:
+    """Resolve the architecture-level prior-scale smoothness value."""
+    prior = architecture.get("prior")
+    if isinstance(prior, Mapping) and "scale" in prior:
+        return float(prior["scale"])
+    return float(architecture.get("prior_scale", 1.0))
+
+
 def _write_calibration(
     path: Path,
     parameter_names: list[str],
@@ -97,16 +105,17 @@ def _write_prior_scale_diagnostics(
     """Write the prior/smoothness state used by the recovery run."""
     shape = model.nets["x"]
     handle = getattr(shape, "prior_scale_handle", None)
+    configured_scale = _configured_prior_scale(architecture)
     diagnostics: dict[str, Any] = {
         "prior": architecture.get("prior"),
-        "configured_prior_scale": float(architecture["prior_scale"]),
+        "configured_prior_scale": configured_scale,
     }
 
     if handle is None:
         diagnostics.update(
             {
                 "mode": "fixed",
-                "scale": float(architecture["prior_scale"]),
+                "scale": configured_scale,
             }
         )
     elif handle.mode == "empirical_bayes":
@@ -219,13 +228,14 @@ def _run(config: Mapping[str, Any], paths: ArtifactPaths, smoke: bool) -> None:
     y = family(raw_params).sample()
     architecture = config["architecture"]
     hidden_dims = [int(width) for width in architecture["hidden_dims"]]
+    prior_scale = _configured_prior_scale(architecture)
     model = BayesianNAMLSS(
         formula={
             "x": BayesianMLP(
                 1,
                 family.param_count,
                 hidden_dims=hidden_dims,
-                prior_scale=float(architecture["prior_scale"]),
+                prior_scale=prior_scale,
                 prior=architecture.get("prior"),
                 kl_divisor=n,
                 activation=str(architecture["activation"]),
