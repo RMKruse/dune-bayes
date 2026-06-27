@@ -89,6 +89,10 @@ The formula creates two shape functions: a fully variational `BayesianMLP` for
 Normal family's location and scale parameters. The effect ribbon for `x1` is
 therefore a posterior summary of that feature's contribution to the selected
 distributional parameter, not a prediction interval for future observations.
+The same formula-fit-band workflow is supported for the shipped paper-artifact
+families: `NormalFamily`, `GammaFamily`, `StudentTFamily`, `JohnsonSUFamily`,
+`NegativeBinomialFamily`, and `BetaFamily`; each family sets the output width
+through its `param_count` and applies its own parameter links.
 
 `draw_predictive` uses coherent posterior weight draws to build a
 `MixtureSameFamily` posterior predictive distribution. `plot_dist` and

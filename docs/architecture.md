@@ -102,17 +102,27 @@ decomposition Goal 1 reports. `sample_effects` produces the per-feature
 `LogLikSampler` feeds the pointwise log-likelihood matrix (accumulated in
 float64) to WAIC / PSIS-LOO in `compare/`.
 
+The reader-facing plots keep those concepts separate. An **effect ribbon** is
+a centered per-feature, per-parameter summary of epistemic shape-function
+uncertainty. A **response-level** predictive band comes from the posterior
+predictive mixture and includes both epistemic spread across weight draws and
+aleatoric spread within the response family. Aleatoric noise is therefore never
+attributed to an individual feature curve.
+
 ## Other families
 
 Nothing above is Normal-specific except the link table. The family's
 `param_count` sets the output width of every shape function and the
 intercept; the family applies its own links column-by-column:
 
-| Family           | `param_count` | Links (per column)                          |
-| ---------------- | ------------- | ------------------------------------------- |
-| `NormalFamily`   | 2             | identity (μ) · softplus + EPS (σ)           |
-| `StudentTFamily` | 3             | identity (μ) · softplus + EPS (σ) · softplus + 1 (df) |
-| `GammaFamily`    | 2             | softplus + EPS (concentration) · softplus + EPS (rate) |
+| Family | `param_count` | Links (per column) |
+| --- | --- | --- |
+| `NormalFamily` | 2 | identity (μ) · softplus + EPS (σ) |
+| `GammaFamily` | 2 | softplus + EPS (concentration) · softplus + EPS (rate) |
+| `StudentTFamily` | 3 | identity (μ) · softplus + EPS (σ) · softplus + EPS + `df_min` (df) |
+| `JohnsonSUFamily` | 4 | identity (skew) · softplus + EPS (tailweight) · identity (loc) · softplus + EPS (scale) |
+| `NegativeBinomialFamily` | 2 | softplus + EPS (mean) · softplus + EPS (dispersion) |
+| `BetaFamily` | 2 | floored sigmoid (mean in (0, 1)) · softplus + EPS (precision) |
 
 Mixed formulas work the same way: deterministic shape functions (`MLP`,
 `ResNet`) drop into the same sum as zero-KL contributors, `NeuralLinearMLP`

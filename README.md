@@ -33,7 +33,11 @@ bands → WAIC/LOO — works and is tested, but the API may still change without
 deprecation. Python 3.12+, CPU by default, CUDA opt-in. Publication metadata for
 the planned `v0.1.0-paper` artifact release lives in
 [`experiments/publication/release-metadata.yaml`](experiments/publication/release-metadata.yaml);
-the final paper/preprint citation and Zenodo DOI remain pending author approval.
+the release target branch is `main`, and the final paper/preprint citation and
+Zenodo DOI remain pending author approval. The GitHub Actions workflow is
+configured as manual-only CI until public release activation; push and pull
+request triggers are documented in `.github/workflows/ci.yml` but intentionally
+inactive while the release remains in paper-artifact preparation.
 
 ## Install
 
@@ -90,8 +94,9 @@ Shape functions available in formulas: `BayesianMLP` (fully variational),
 and the deterministic baselines `MLP` and `ResNet`. Interactions are joint
 nets over multiple inputs (`BayesianMLP(x1):BayesianMLP(x2)`); categorical
 features become Bayesian embeddings — the neural analog of a random effect,
-with partial pooling of rare levels. Families shipped so far:
-`NormalFamily`, `StudentTFamily`, `GammaFamily`.
+with partial pooling of rare levels. Families shipped in the paper artifact
+scope are `NormalFamily`, `GammaFamily`, `StudentTFamily`,
+`JohnsonSUFamily`, `NegativeBinomialFamily`, and `BetaFamily`.
 
 The effect ribbon is a centered per-feature shape-function summary, so it shows
 epistemic uncertainty in one learned contribution. The response band comes from
@@ -129,8 +134,9 @@ flowchart TB
 Every dense layer is a `VariationalDense` (mean-field Gaussian posterior over
 weights), so σ is feature-dependent — heteroscedastic by construction — and
 every effect carries an epistemic credible band. Other families work the same
-way: the family's `param_count` sets the output width (`StudentTFamily` → 3
-columns, `GammaFamily` → 2). The full walkthrough lives in
+way: the family's `param_count` sets the output width (`StudentTFamily` -> 3
+columns, `JohnsonSUFamily` -> 4, the two-parameter families -> 2). The full
+walkthrough lives in
 [`docs/architecture.md`](docs/architecture.md).
 
 ## Documentation
