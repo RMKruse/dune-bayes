@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import importlib
+import json
 import os
 import sys
 import tempfile
@@ -86,6 +87,52 @@ def _write_calibration(
                         ),
                     }
                 )
+
+
+def _write_prior_scale_diagnostics(
+    path: Path,
+    model: BayesianNAMLSS,
+    architecture: Mapping[str, Any],
+) -> None:
+    """Write the prior/smoothness state used by the recovery run."""
+    shape = model.nets["x"]
+    handle = getattr(shape, "prior_scale_handle", None)
+    diagnostics: dict[str, Any] = {
+        "prior": architecture.get("prior"),
+        "configured_prior_scale": float(architecture["prior_scale"]),
+    }
+
+    if handle is None:
+        diagnostics.update(
+            {
+                "mode": "fixed",
+                "scale": float(architecture["prior_scale"]),
+            }
+        )
+    elif handle.mode == "empirical_bayes":
+        diagnostics.update(
+            {
+                "mode": handle.mode,
+                "initial_scale": handle.initial_scale,
+                "scale": float(torch.nn.functional.softplus(handle.rho).detach()),
+            }
+        )
+    else:
+        sigma = torch.nn.functional.softplus(handle.rho_s).detach()
+        loc = handle.loc_s.detach()
+        diagnostics.update(
+            {
+                "mode": handle.mode,
+                "hyperprior": handle.hyperprior,
+                "initial_scale": handle.initial_scale,
+                "log_scale_loc": float(loc),
+                "log_scale_sigma": float(sigma),
+                "scale_median": float(torch.exp(loc)),
+                "scale_mean": float(torch.exp(loc + 0.5 * sigma.pow(2))),
+            }
+        )
+
+    path.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
 
 
 def _plot_recovery(
@@ -170,16 +217,18 @@ def _run(config: Mapping[str, Any], paths: ArtifactPaths, smoke: bool) -> None:
     raw_params = truth + intercept_truth
     family = _family(family_name)
     y = family(raw_params).sample()
-    hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
+    architecture = config["architecture"]
+    hidden_dims = [int(width) for width in architecture["hidden_dims"]]
     model = BayesianNAMLSS(
         formula={
             "x": BayesianMLP(
                 1,
                 family.param_count,
                 hidden_dims=hidden_dims,
-                prior_scale=float(config["architecture"]["prior_scale"]),
+                prior_scale=float(architecture["prior_scale"]),
+                prior=architecture.get("prior"),
                 kl_divisor=n,
-                activation=str(config["architecture"]["activation"]),
+                activation=str(architecture["activation"]),
             )
         },
         family=family,
@@ -216,6 +265,9 @@ def _run(config: Mapping[str, Any], paths: ArtifactPaths, smoke: bool) -> None:
         parameter_names,
         levels,
         intercept_coverage,
+    )
+    _write_prior_scale_diagnostics(
+        paths.metrics / "prior_scale.json", model, architecture
     )
     _plot_recovery(
         paths.figures / "recovery.pdf",

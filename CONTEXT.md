@@ -32,6 +32,61 @@ of distributional regression follows the spirit of the **BAMLSS** R package
    evidence proxy) are accepted; literal marginal-likelihood Bayes Factors are
    NOT a hard requirement (they are intractable for NN-sized models — see ADR-0001).
 
+## Paper claim posture
+
+The first paper is **not** a predictive-leaderboard claim. Its defensible claim
+is methodological transparency: DUNE exposes per-feature, per-parameter
+epistemic uncertainty, keeps it distinct from response-family aleatoric
+uncertainty, and quantifies the calibration/narrowness limits of mean-field VI
+instead of hiding them. Real-data benchmarks characterize behavior and motivate
+improvements; they are not framed as universal predictive dominance.
+Improvement work should therefore prioritize **effect-band calibration** and
+VI-vs-NUTS width diagnostics first. Predictive NLL/CRPS are guardrails and
+context, not the primary optimization target for the first paper.
+The first calibration-improvement branch is **prior/smoothness sensitivity**:
+fixed `prior_scale` sweeps plus empirical-Bayes and hierarchical `PriorScale`
+tiers. This comes before architecture/training sweeps and before richer
+posterior families because it is already part of the domain model
+(`prior_scale` as the neural smoothing parameter) and directly tests whether
+the documented prior machinery improves epistemic effect-band coverage.
+The first experimental unit for that branch is **Normal parameter recovery**:
+small enough to iterate, finite-variance, two-parameter, and already backed by
+calibration/intercept-coverage artifacts. Once the sweep design is understood
+there, replicate to Student-t, Gamma, and Johnson's SU, then validate the chosen
+setting against the HMC agreement study.
+For Normal parameter recovery, the first acceptance criterion is lower **mean
+absolute coverage error** across location and scale at nominal 50/80/90/95,
+with centered recovery still visually plausible, intercept coverage not
+pathological, final loss not exploding, ribbons not obviously over-wide
+everywhere, and the learned/sampled prior scale remaining interpretable rather
+than collapsing to an extreme.
+The pre-registered Normal sweep candidates are fixed `prior_scale` values
+`0.3`, `1.0` (current baseline), and `3.0`; `prior='empirical_bayes'`
+initialized at `prior_scale=1.0`; and
+`prior={'mode': 'hierarchical', 'hyperprior': 'inverse_gamma'}` initialized at
+`prior_scale=1.0`. Half-Cauchy is deferred from the first pass because its
+single-sample KL estimator adds noise before the cleaner inverse-gamma tier has
+been interpreted.
+The first screening pass uses seed `9801`, but no candidate is promoted from a
+single seed. A candidate that beats the fixed-`1.0` baseline must be rerun
+against that baseline on the pre-declared confirmatory seeds `9801`, `9811`,
+and `9821` before any `results/` promotion or evidence-manifest update.
+If a prior/smoothness candidate improves effect-band calibration but worsens
+benchmark NLL/CRPS, it may support the simulation/uncertainty claim, but it does
+not become the package default or the benchmark configuration unless it also
+passes predictive guardrails. Calibration-improving settings and benchmark
+settings may remain deliberately separate.
+If the prior/smoothness branch does not materially improve coverage, the first
+richer-inference fallback is a **last-layer richer posterior / low-rank
+covariance** path, likely around `NeuralLinearMLP` or a linearized final layer.
+This is preferred before full-network normalizing flows because it targets
+mean-field narrowness with less implementation risk while preserving the
+interpretability of learned effect functions.
+That richer-inference branch is a follow-up extension, not a v1 paper
+requirement. The first paper may honestly report mean-field VI limitations and
+the disciplined prior/smoothness calibration attempt without shipping a richer
+posterior family.
+
 ## Packaging
 
 **dune-bayes is its own package**, reusing NAMpy's machinery by design — but the
@@ -176,6 +231,10 @@ secondary, biased evidence proxy. No literal Bayes Factors (ADR-0001).
   report empirical coverage per distribution parameter at nominal 50/80/90/95,
   and the HMC-agreement experiment quantifies the mean-field shrinkage
   (VI-vs-NUTS band-width ratio). No post-hoc band inflation/recalibration in v1.
+  When the project says calibration needs improvement, that means improving the
+  model/inference setup — priors, family choice, architecture, training budget,
+  posterior family, or prior-scale learning — rather than applying a detached
+  post-hoc correction to make intervals look calibrated.
   Recovery comparisons use **centered truth vs centered posterior draws** (shape
   functions are identified only up to level; the intercept's coverage is
   assessed separately).

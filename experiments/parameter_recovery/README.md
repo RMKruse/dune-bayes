@@ -15,6 +15,19 @@ uv run --extra experiments python experiments/parameter_recovery/run.py \
 Add `--smoke` for the bounded CI path. Outputs land beneath `runs/`; inspected
 paper artifacts are promoted to `results/canonical-<family>/`.
 
+## Prior/smoothness calibration sweep
+
+`prior_sweep/` contains the pre-registered first calibration-improvement track:
+Normal parameter recovery with fixed `prior_scale` values `0.3`, `1.0`, and
+`3.0`, plus empirical-Bayes and hierarchical inverse-gamma `PriorScale` tiers.
+The sweep tests the ADR-0002 smoothness machinery before broader architecture or
+posterior-family changes.
+
+Each run writes `metrics/prior_scale.json` alongside calibration metrics so the
+learned or sampled smoothness state is inspectable. Keep outputs in ignored
+`runs/` until they beat the baseline under the documented acceptance criterion
+and have been manually reviewed.
+
 ## Statistical convention
 
 The additive feature contribution is identified only up to a constant. Both

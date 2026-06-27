@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import subprocess
 import sys
 import time
@@ -18,6 +19,7 @@ def _smoke_config(tmp_path: Path, source_name: str) -> Path:
     config = yaml.safe_load(source.read_text(encoding="utf-8"))
     config["artifacts"] = {"root": str(tmp_path), "run_name": "smoke"}
     target = tmp_path / source_name
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
     return target
 
@@ -43,6 +45,7 @@ def test_normal_smoke_writes_recovery_and_calibration_artifacts(
     run = tmp_path / "parameter_recovery_normal" / "smoke"
     assert (run / "figures" / "recovery.pdf").is_file()
     assert (run / "metrics" / "calibration.csv").is_file()
+    assert (run / "metrics" / "prior_scale.json").is_file()
 
 
 def test_family_panel_reports_every_parameter_and_intercept_separately(
@@ -100,6 +103,7 @@ def test_config_and_seed_regenerate_identical_recovery_artifacts(
     artifacts = (
         run / "metrics" / "calibration.csv",
         run / "metrics" / "intercept_coverage.csv",
+        run / "metrics" / "prior_scale.json",
         run / "figures" / "recovery.pdf",
         run / "figures" / "calibration.pdf",
         run / "arrays" / "recovery.npz",
@@ -139,3 +143,60 @@ def test_recovery_arrays_center_truth_and_each_posterior_draw(
     np.testing.assert_allclose(arrays["centered_draws"].mean(axis=1), 0.0, atol=1e-6)
     assert arrays["intercept_truth"].shape == (3,)
     assert arrays["intercept_draws"].shape == (32, 3)
+
+
+def test_prior_sweep_configs_are_pre_registered() -> None:
+    """The first calibration sweep stays scoped to the agreed five candidates."""
+    sweep_dir = Path("experiments/parameter_recovery/prior_sweep")
+    configs = sorted(path.name for path in sweep_dir.glob("normal-*.yaml"))
+
+    assert configs == [
+        "normal-empirical-bayes.yaml",
+        "normal-fixed-0p3.yaml",
+        "normal-fixed-1p0.yaml",
+        "normal-fixed-3p0.yaml",
+        "normal-hierarchical-ig.yaml",
+    ]
+    for filename in configs:
+        config = yaml.safe_load((sweep_dir / filename).read_text(encoding="utf-8"))
+        assert config["family"] == "normal"
+        assert config["experiment"] == "parameter_recovery_normal"
+        assert config["artifacts"]["root"] == "../runs"
+
+
+def test_prior_sweep_smoke_writes_prior_scale_diagnostics(tmp_path: Path) -> None:
+    """EB and hierarchical candidates expose interpretable scale diagnostics."""
+    expected_modes = {
+        "prior_sweep/normal-empirical-bayes.yaml": "empirical_bayes",
+        "prior_sweep/normal-hierarchical-ig.yaml": "hierarchical",
+    }
+    for source_name, mode in expected_modes.items():
+        config_path = _smoke_config(tmp_path, source_name)
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "experiments/parameter_recovery/run.py",
+                str(config_path),
+                "--smoke",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+        diagnostics_path = (
+            tmp_path
+            / "parameter_recovery_normal"
+            / "smoke"
+            / "metrics"
+            / "prior_scale.json"
+        )
+        diagnostics = json.loads(diagnostics_path.read_text(encoding="utf-8"))
+        assert diagnostics["mode"] == mode
+        if mode == "empirical_bayes":
+            assert diagnostics["scale"] > 0.0
+        else:
+            assert diagnostics["hyperprior"] == "inverse_gamma"
+            assert diagnostics["scale_median"] > 0.0
+            assert diagnostics["scale_mean"] > 0.0

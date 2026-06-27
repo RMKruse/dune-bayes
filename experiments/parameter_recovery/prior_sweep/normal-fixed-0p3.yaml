@@ -1,0 +1,27 @@
+experiment: parameter_recovery_normal
+seed: 9801
+family: normal
+parameter_names: [location, scale]
+architecture:
+  hidden_dims: [32, 32]
+  prior_scale: 0.3
+  activation: tanh
+draws: 500
+data:
+  n: 256
+truth:
+  intercept: [0.5, 0.3]
+  effects:
+    - {kind: sin, amplitude: 1.2, frequency: 1.0}
+    - {kind: cos, amplitude: 0.4, frequency: 1.0}
+calibration:
+  levels: [0.5, 0.8, 0.9, 0.95]
+recovery:
+  credible_level: 0.9
+training:
+  epochs: 800
+  learning_rate: 0.01
+  warmup_epochs: 40
+artifacts:
+  root: ../runs
+  run_name: prior-sweep-normal-fixed-0p3
