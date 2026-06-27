@@ -227,6 +227,36 @@ def test_methods_section_covers_adr_backed_math_contract() -> None:
     assert missing == []
 
 
+def test_limitations_section_names_reviewer_scope_boundaries() -> None:
+    """The paper limitations preserve the explicit reviewer caveats for #148."""
+    limitations = _section(
+        MANUSCRIPT.read_text(encoding="utf-8"),
+        "## Limitations",
+        "## Reproducibility",
+    )
+    normalized = " ".join(limitations.lower().split())
+
+    required_terms = [
+        "mean-field vi",
+        "under-cover",
+        "validation-only nuts",
+        "experiments/hmc_agreement/results/canonical",
+        "not a shipped package backend",
+        "waic",
+        "psis-loo",
+        "elbo",
+        "literal bayes factors",
+        "out of scope",
+        "coverage is measured and reported",
+        "not asserted nominally correct",
+        "no post-hoc band inflation",
+        "conformal calibration",
+        "recalibration",
+    ]
+
+    assert [term for term in required_terms if term not in normalized] == []
+
+
 def test_benchmark_section_matches_accepted_comparator_scope() -> None:
     """The benchmark prose honors comparator decision #145 for slice #147."""
     manuscript = MANUSCRIPT.read_text(encoding="utf-8")

@@ -279,6 +279,35 @@ def test_reviewer_appendix_documents_uncertainty_and_methods_conventions(
     assert "softplus(x) + EPS" in text
 
 
+def test_reviewer_appendix_documents_reproducibility_scope(
+    tmp_path: Path,
+) -> None:
+    """The appendix distinguishes bounded audit scope from full reruns."""
+    _write_promoted_result(tmp_path)
+    manifest_path = _write_manifest(tmp_path)
+    output_dir = tmp_path / "paper"
+
+    report = build_paper_artifacts(manifest_path, output_dir=output_dir, root=tmp_path)
+
+    assert report.ready is True
+    text = (output_dir / "reviewer-evidence-appendix.md").read_text("utf-8")
+    required_terms = [
+        "WAIC",
+        "PSIS-LOO",
+        "ELBO",
+        "literal Bayes factors",
+        "no post-hoc band inflation",
+        "conformal calibration",
+        "recalibration",
+        "not a shipped package backend",
+        "bounded audit",
+        "Full canonical experiment reruns are manual",
+        "Promoted canonical evidence remains the reviewed source",
+    ]
+
+    assert [term for term in required_terms if term not in text] == []
+
+
 def test_builder_reports_missing_canonical_input(tmp_path: Path) -> None:
     """Missing promoted files fail before paper artifacts are written."""
     _write_promoted_result(tmp_path)
