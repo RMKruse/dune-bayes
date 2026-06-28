@@ -144,6 +144,20 @@ def _write_prior_scale_diagnostics(
     path.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
 
 
+def _write_training_diagnostics(
+    path: Path,
+    history: Mapping[str, Sequence[float]],
+) -> None:
+    """Write final ELBO components for manual sweep review."""
+    diagnostics = {
+        "epochs": len(history["loss"]),
+        "final_loss": float(history["loss"][-1]),
+        "final_nll": float(history["nll"][-1]),
+        "final_kl": float(history["kl"][-1]),
+    }
+    path.write_text(json.dumps(diagnostics, indent=2, sort_keys=True) + "\n")
+
+
 def _plot_recovery(
     path: Path,
     x: torch.Tensor,
@@ -245,7 +259,7 @@ def _run(config: Mapping[str, Any], paths: ArtifactPaths, smoke: bool) -> None:
         n_obs=n,
     )
     features = {"x": x.unsqueeze(-1)}
-    model.fit(
+    history = model.fit(
         features,
         y,
         epochs=epochs,
@@ -279,6 +293,7 @@ def _run(config: Mapping[str, Any], paths: ArtifactPaths, smoke: bool) -> None:
     _write_prior_scale_diagnostics(
         paths.metrics / "prior_scale.json", model, architecture
     )
+    _write_training_diagnostics(paths.metrics / "training.json", history)
     _plot_recovery(
         paths.figures / "recovery.pdf",
         x,

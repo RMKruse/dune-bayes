@@ -74,6 +74,9 @@ def test_normal_smoke_writes_recovery_and_calibration_artifacts(
     assert (run / "figures" / "recovery.pdf").is_file()
     assert (run / "metrics" / "calibration.csv").is_file()
     assert (run / "metrics" / "prior_scale.json").is_file()
+    training = json.loads((run / "metrics" / "training.json").read_text())
+    assert training["epochs"] == 4
+    assert np.isfinite(float(training["final_loss"]))
 
 
 def test_prior_tier_dict_scale_runs_without_legacy_prior_scale(
@@ -169,6 +172,7 @@ def test_config_and_seed_regenerate_identical_recovery_artifacts(
         run / "metrics" / "calibration.csv",
         run / "metrics" / "intercept_coverage.csv",
         run / "metrics" / "prior_scale.json",
+        run / "metrics" / "training.json",
         run / "figures" / "recovery.pdf",
         run / "figures" / "calibration.pdf",
         run / "arrays" / "recovery.npz",

@@ -1,7 +1,8 @@
-"""Prior/smoothness sweep review notebook helpers (PRD-0004, GitHub #160)."""
+"""Prior/smoothness screening review helpers (PRD-0004, GitHub #160/#161)."""
 
 from __future__ import annotations
 
+import csv
 import json
 import warnings
 from pathlib import Path
@@ -11,10 +12,57 @@ import pytest
 import yaml
 
 from experiments.publication.prior_sweep_review import (
+    main,
     materialize_confirmatory_configs,
     prior_sweep_commands,
     summarize_prior_sweep_outputs,
 )
+
+
+def _write_csv(path: Path, rows: list[dict[str, float | str]]) -> None:
+    """Write one long-form metrics table for a fake sweep run."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=rows[0].keys(), lineterminator="\n")
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _write_fake_run(
+    root: Path,
+    *,
+    run_name: str,
+    mean_offset: float,
+    prior_scale: dict[str, object],
+) -> None:
+    """Create the public artifacts consumed by the review command."""
+    run = root / "parameter_recovery_normal" / run_name
+    rows = [
+        {
+            "parameter": parameter,
+            "nominal": nominal,
+            "empirical_coverage": nominal - mean_offset,
+        }
+        for parameter in ("location", "scale")
+        for nominal in (0.5, 0.8, 0.9, 0.95)
+    ]
+    _write_csv(run / "metrics" / "calibration.csv", rows)
+    _write_csv(run / "metrics" / "intercept_coverage.csv", rows)
+    (run / "metrics" / "prior_scale.json").write_text(
+        json.dumps(prior_scale), encoding="utf-8"
+    )
+    (run / "metrics" / "training.json").write_text(
+        json.dumps(
+            {"epochs": 800, "final_loss": 1.25, "final_nll": 1.0, "final_kl": 0.25}
+        ),
+        encoding="utf-8",
+    )
+    (run / "figures").mkdir(parents=True, exist_ok=True)
+    (run / "figures" / "recovery.pdf").write_bytes(b"%PDF-1.4\n")
+    (run / "figures" / "calibration.pdf").write_bytes(b"%PDF-1.4\n")
+    (run / "run.json").write_text(
+        json.dumps({"seed": 9801, "smoke": False}), encoding="utf-8"
+    )
 
 
 def test_prior_sweep_review_lists_registered_smoke_and_full_commands() -> None:
@@ -163,6 +211,60 @@ def test_prior_sweep_review_materializes_confirmatory_configs_in_scratch(
             "runs",
         )
     assert not (tmp_path / "experiments" / "parameter_recovery" / "results").exists()
+
+
+def test_prior_sweep_review_records_coverage_ranking_and_decision(
+    tmp_path: Path,
+) -> None:
+    """The screening review ranks all candidates without promoting artifacts."""
+    config_dir = Path("experiments/parameter_recovery/prior_sweep")
+    runs_root = tmp_path / "runs"
+    offsets = {
+        "prior-sweep-normal-empirical-bayes": 0.20,
+        "prior-sweep-normal-fixed-0p3": 0.15,
+        "prior-sweep-normal-fixed-1p0": 0.10,
+        "prior-sweep-normal-fixed-3p0": 0.05,
+        "prior-sweep-normal-hierarchical-ig": 0.30,
+    }
+    for config_path in sorted(config_dir.glob("normal-*.yaml")):
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        run_name = str(config["artifacts"]["run_name"])
+        _write_fake_run(
+            runs_root,
+            run_name=run_name,
+            mean_offset=offsets[run_name],
+            prior_scale={"mode": "fixed", "scale": 1.0},
+        )
+
+    output_dir = tmp_path / "review"
+    main(
+        [
+            "--config-dir",
+            str(config_dir),
+            "--runs-root",
+            str(runs_root),
+            "--output-dir",
+            str(output_dir),
+            "--decision",
+            "nominate:prior-sweep-normal-fixed-3p0",
+            "--decision-notes",
+            "Synthetic review nominates the lowest coverage-error candidate.",
+        ]
+    )
+
+    summary = json.loads((output_dir / "screening_summary.json").read_text())
+    assert summary["baseline_run_name"] == "prior-sweep-normal-fixed-1p0"
+    assert summary["decision"]["status"] == "nominate"
+    assert summary["decision"]["candidate"] == "prior-sweep-normal-fixed-3p0"
+    assert [row["run_name"] for row in summary["ranking"]] == [
+        "prior-sweep-normal-fixed-3p0",
+        "prior-sweep-normal-fixed-1p0",
+        "prior-sweep-normal-fixed-0p3",
+        "prior-sweep-normal-empirical-bayes",
+        "prior-sweep-normal-hierarchical-ig",
+    ]
+    assert summary["ranking"][0]["training"]["final_loss"] == 1.25
+    assert (output_dir / "screening_summary.csv").is_file()
 
 
 def test_paper_results_explorer_executes_top_to_bottom_without_running_sweeps(
