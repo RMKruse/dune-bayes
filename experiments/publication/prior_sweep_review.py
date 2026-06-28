@@ -9,6 +9,7 @@ import json
 import math
 import shlex
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,19 @@ _CSV_FIELDS = (
     "recovery_figure",
     "calibration_figure",
 )
+
+
+@dataclass(frozen=True)
+class PriorSweepDecisionReport:
+    """Readiness report for the reviewed prior/smoothness promotion decision.
+
+    Attributes:
+        ready: Whether the decision record is complete and internally coherent.
+        failures: Actionable validation failures, empty when ready.
+    """
+
+    ready: bool
+    failures: tuple[str, ...]
 
 
 def prior_sweep_commands(root: Path | str) -> tuple[dict[str, Any], ...]:
@@ -112,6 +126,89 @@ def summarize_prior_sweep_outputs(root: Path | str) -> tuple[dict[str, Any], ...
             }
         )
     return tuple(rows)
+
+
+def validate_prior_sweep_decision(
+    decision_path: Path | str,
+    *,
+    root: Path | str | None = None,
+) -> PriorSweepDecisionReport:
+    """Validate the human-reviewed prior/smoothness publication decision.
+
+    Args:
+        decision_path: YAML decision record for GitHub #163.
+        root: Repository root used to resolve relative paths. Defaults to the
+            current working directory because the checked-in decision stores
+            repository-relative paths.
+
+    Returns:
+        Readiness report for the decision record.
+    """
+    decision_file = Path(decision_path)
+    repo_root = Path(root) if root is not None else Path(".")
+    decision = yaml.safe_load(decision_file.read_text(encoding="utf-8"))
+    failures: list[str] = []
+
+    if not isinstance(decision, dict):
+        return PriorSweepDecisionReport(
+            ready=False,
+            failures=("decision record must be a YAML mapping",),
+        )
+
+    if decision.get("github_issue") != 163:
+        failures.append("decision record must reference GitHub issue 163")
+    if decision.get("status") != "no_promotion":
+        failures.append("decision status must record the no_promotion outcome")
+
+    for field in (
+        "reviewed_against",
+        "paper_results_notebook",
+        "artifact_builder",
+        "publication_evidence_manifest",
+    ):
+        path = repo_root / str(decision.get(field, ""))
+        if not path.is_file():
+            failures.append(f"{field} does not point to a checked-in file: {path}")
+
+    manifest_path = repo_root / str(decision.get("publication_evidence_manifest", ""))
+    if manifest_path.is_file():
+        manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+        normal_evidence_path = _normal_publication_evidence_path(manifest)
+        if normal_evidence_path is None:
+            failures.append("publication manifest is missing Normal recovery evidence")
+        elif decision.get("canonical_artifact") != normal_evidence_path:
+            failures.append(
+                "canonical_artifact must match the Normal publication evidence path"
+            )
+    else:
+        normal_evidence_path = None
+
+    canonical_path = repo_root / str(decision.get("canonical_artifact", ""))
+    normal_config_path = canonical_path / "config.yaml"
+    if normal_config_path.is_file():
+        normal_config = yaml.safe_load(normal_config_path.read_text(encoding="utf-8"))
+        prior_scale = normal_config.get("architecture", {}).get("prior_scale")
+        if prior_scale != 1.0:
+            failures.append("canonical Normal evidence must remain at prior_scale=1.0")
+    else:
+        failures.append(f"canonical artifact config is missing: {normal_config_path}")
+
+    _validate_no_promotion_policy(decision, failures)
+    _validate_review_summary(decision, failures)
+
+    follow_up = str(decision.get("follow_up", ""))
+    if "last-layer" not in follow_up or "low-rank covariance" not in follow_up:
+        failures.append(
+            "no-promotion decision must name the richer posterior follow-up"
+        )
+
+    if normal_evidence_path is not None and not canonical_path.is_dir():
+        failures.append(f"canonical artifact directory is missing: {canonical_path}")
+
+    return PriorSweepDecisionReport(
+        ready=not failures,
+        failures=tuple(failures),
+    )
 
 
 def materialize_confirmatory_configs(
@@ -298,7 +395,10 @@ def _coverage_errors(path: Path) -> dict[str, float]:
 
 def _read_json(path: Path) -> dict[str, Any]:
     """Read one JSON artifact."""
-    return json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError(f"expected JSON object artifact: {path}")
+    return payload
 
 
 def _read_metric_rows(path: Path) -> list[dict[str, Any]]:
@@ -354,6 +454,116 @@ def _prior_scale_mode(diagnostics: Mapping[str, Any]) -> str:
 def _run_root(config: Mapping[str, Any], runs_root: Path) -> Path:
     """Resolve the configured run directory under the supplied scratch root."""
     return runs_root / str(config["experiment"]) / str(config["artifacts"]["run_name"])
+
+
+def _normal_publication_evidence_path(manifest: object) -> str | None:
+    """Return the paper-facing Normal recovery evidence path, if present."""
+    if not isinstance(manifest, dict):
+        return None
+    for claim in manifest.get("claims", []):
+        if not isinstance(claim, dict):
+            continue
+        if claim.get("id") != "per-feature-per-parameter-epistemic-bands":
+            continue
+        evidence_entries = claim.get("evidence", [])
+        if isinstance(evidence_entries, dict):
+            evidence_entries = [evidence_entries]
+        for evidence in evidence_entries:
+            if not isinstance(evidence, dict):
+                continue
+            path = str(evidence.get("path", ""))
+            if path.endswith("canonical-normal"):
+                return path
+    return None
+
+
+def _validate_no_promotion_policy(
+    decision: Mapping[str, Any],
+    failures: list[str],
+) -> None:
+    """Validate the decision fields that prevent accidental promotion."""
+    policy = decision.get("evidence_policy", {})
+    if not isinstance(policy, dict):
+        failures.append("evidence_policy must be a mapping")
+        return
+
+    expected_false_fields = (
+        "canonical_artifact_path_changed",
+        "publication_manifest_changed",
+        "artifact_building_path_changed",
+        "paper_results_notebook_promotes_candidate",
+    )
+    if policy.get("promoted_candidate") is not None:
+        failures.append("no-promotion decision must not name a promoted candidate")
+    for field in expected_false_fields:
+        if policy.get(field) is not False:
+            failures.append(f"evidence_policy.{field} must be false")
+
+    unchanged_defaults = decision.get("unchanged_defaults", {})
+    if not isinstance(unchanged_defaults, dict):
+        failures.append("unchanged_defaults must be a mapping")
+        return
+    for field in ("package_defaults", "benchmark_configs"):
+        if unchanged_defaults.get(field) is not True:
+            failures.append(f"unchanged_defaults.{field} must be true")
+
+
+def _validate_review_summary(
+    decision: Mapping[str, Any],
+    failures: list[str],
+) -> None:
+    """Validate that the no-promotion rationale is self-contained."""
+    summary = decision.get("review_summary", {})
+    if not isinstance(summary, dict):
+        failures.append("review_summary must be a mapping")
+        return
+
+    baseline = summary.get("baseline", {})
+    if not isinstance(baseline, dict):
+        failures.append("review_summary.baseline must be a mapping")
+    else:
+        if baseline.get("run_name") != _BASELINE_RUN_NAME:
+            failures.append("review_summary.baseline must name the fixed 1.0 baseline")
+        if "coverage_mae" not in baseline:
+            failures.append("review_summary.baseline must record coverage_mae")
+        if "intercept_coverage_mae" not in baseline:
+            failures.append(
+                "review_summary.baseline must record intercept_coverage_mae"
+            )
+
+    rejected = summary.get("rejected_candidates", [])
+    if not isinstance(rejected, list) or len(rejected) != 4:
+        failures.append("review_summary must record four rejected sweep candidates")
+        return
+    rejected_names = {
+        str(candidate.get("run_name", ""))
+        for candidate in rejected
+        if isinstance(candidate, dict)
+    }
+    expected_names = {
+        "prior-sweep-normal-fixed-0p3",
+        "prior-sweep-normal-fixed-3p0",
+        "prior-sweep-normal-empirical-bayes",
+        "prior-sweep-normal-hierarchical-ig",
+    }
+    if rejected_names != expected_names:
+        failures.append("review_summary rejected candidates do not match the sweep")
+    for candidate in rejected:
+        if not isinstance(candidate, dict):
+            failures.append("each rejected candidate must be a mapping")
+            continue
+        if "coverage_mae" not in candidate:
+            failures.append("each rejected candidate must record coverage_mae")
+        reason = str(candidate.get("reason", "")).strip()
+        if not reason:
+            failures.append("each rejected candidate must record a rejection reason")
+        if candidate.get("run_name") == "prior-sweep-normal-fixed-3p0":
+            normalized_reason = reason.lower()
+            if "intercept coverage" not in normalized_reason:
+                failures.append(
+                    "review_summary must record the fixed 3.0 "
+                    "intercept-coverage rejection"
+                )
 
 
 def _summarize_candidate(
