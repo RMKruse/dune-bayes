@@ -1,0 +1,59 @@
+version: 1
+github_issue: 163
+status: no_promotion
+decision_date: 2026-06-28
+reviewed_against: docs/issues/0028-prior-smoothness-calibration-sweep.md
+screening_summary: experiments/parameter_recovery/runs/prior-sweep-review-9801/screening_summary.json
+paper_results_notebook: experiments/publication/paper_results_explorer.ipynb
+artifact_builder: experiments/publication/artifacts.py
+publication_evidence_manifest: experiments/publication/evidence-manifest.yaml
+canonical_artifact: experiments/parameter_recovery/results/canonical-normal
+decision: >
+  Do not promote a prior/smoothness calibration candidate. The screening review
+  found no candidate that materially improved Normal effect-band calibration
+  while satisfying the pre-registered guardrails for intercept coverage,
+  plausible centered recovery, stable training, ribbon width, and interpretable
+  prior-scale diagnostics.
+review_summary:
+  baseline:
+    run_name: prior-sweep-normal-fixed-1p0
+    coverage_mae: 0.10087890625
+    intercept_coverage_mae: 0.3875
+  rejected_candidates:
+    - run_name: prior-sweep-normal-fixed-3p0
+      coverage_mae: 0.07294921875
+      reason: >
+        Lowest effect-band coverage MAE, but rejected because scale intercept
+        coverage was 0.0 at every nominal level under manual review.
+    - run_name: prior-sweep-normal-fixed-0p3
+      coverage_mae: 0.33486328125
+      reason: >
+        Materially under-covered relative to the fixed 1.0 baseline.
+    - run_name: prior-sweep-normal-hierarchical-ig
+      coverage_mae: 0.44521484375
+      reason: >
+        Materially under-covered; the sampled scale shrank near 0.24 and the
+        recovery review indicated oversmoothing.
+    - run_name: prior-sweep-normal-empirical-bayes
+      coverage_mae: 0.4544921875
+      reason: >
+        Materially under-covered; the learned scale shrank near 0.21 and the
+        recovery review indicated oversmoothing.
+evidence_policy:
+  promoted_candidate: null
+  canonical_artifact_path_changed: false
+  publication_manifest_changed: false
+  artifact_building_path_changed: false
+  paper_results_notebook_promotes_candidate: false
+unchanged_defaults:
+  package_defaults: true
+  benchmark_configs: true
+  rationale: >
+    Predictive guardrails were not separately reviewed for any prior/smoothness
+    candidate, so package defaults and benchmark configurations remain fixed at
+    their existing prior_scale settings.
+follow_up: last-layer richer posterior / low-rank covariance
+follow_up_note: >
+  Preserve the richer posterior branch around NeuralLinearMLP or a linearized
+  final layer as the next calibration-improvement path if later paper or
+  post-v1 work needs materially wider epistemic effect bands.

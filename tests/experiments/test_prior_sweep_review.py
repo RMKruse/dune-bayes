@@ -18,6 +18,12 @@ from experiments.publication.prior_sweep_review import (
     summarize_prior_sweep_outputs,
 )
 
+DECISION = Path("experiments/publication/prior-smoothness-calibration-decision.yaml")
+EVIDENCE_MANIFEST = Path("experiments/publication/evidence-manifest.yaml")
+NORMAL_CANONICAL_CONFIG = Path(
+    "experiments/parameter_recovery/results/canonical-normal/config.yaml"
+)
+
 
 def _write_csv(path: Path, rows: list[dict[str, float | str]]) -> None:
     """Write one long-form metrics table for a fake sweep run."""
@@ -310,3 +316,31 @@ def test_paper_results_explorer_keeps_simulation_and_benchmark_settings_distinct
 
     assert "Calibration-improving simulation settings" in markdown
     assert "package default or benchmark configuration" in markdown
+
+
+def test_no_promotion_decision_preserves_canonical_publication_evidence() -> None:
+    """The reviewed prior/smoothness branch records no promotion for #163."""
+    decision = yaml.safe_load(DECISION.read_text(encoding="utf-8"))
+    manifest = yaml.safe_load(EVIDENCE_MANIFEST.read_text(encoding="utf-8"))
+    normal_config = yaml.safe_load(
+        NORMAL_CANONICAL_CONFIG.read_text(encoding="utf-8")
+    )
+
+    assert decision["status"] == "no_promotion"
+    assert decision["reviewed_against"] == (
+        "docs/issues/0028-prior-smoothness-calibration-sweep.md"
+    )
+    assert decision["screening_summary"] == (
+        "experiments/parameter_recovery/runs/prior-sweep-review-9801/"
+        "screening_summary.json"
+    )
+    assert decision["follow_up"] == "last-layer richer posterior / low-rank covariance"
+    assert decision["unchanged_defaults"]["package_defaults"] is True
+    assert decision["unchanged_defaults"]["benchmark_configs"] is True
+
+    normal_evidence = manifest["claims"][1]["evidence"][0]
+    assert normal_evidence["path"] == (
+        "experiments/parameter_recovery/results/canonical-normal"
+    )
+    assert normal_config["architecture"]["prior_scale"] == 1.0
+    assert decision["canonical_artifact"] == normal_evidence["path"]

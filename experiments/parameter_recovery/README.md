@@ -28,6 +28,15 @@ learned or sampled smoothness state is inspectable. Keep outputs in ignored
 `runs/` until they beat the baseline under the documented acceptance criterion
 and have been manually reviewed.
 
+The reviewed 2026-06-28 screening decision for GitHub #163 promoted no
+candidate. Fixed `prior_scale=3.0` reduced effect-band coverage error but failed
+the intercept-coverage guardrail; fixed `0.3`, empirical-Bayes, and hierarchical
+inverse-gamma materially under-covered. The paper-facing Normal evidence remains
+`results/canonical-normal` with `prior_scale=1.0`; no package default or
+benchmark config changed. The next calibration-improvement branch, if needed, is
+a last-layer richer posterior or low-rank covariance path rather than another
+promotion from this sweep.
+
 ## Statistical convention
 
 The additive feature contribution is identified only up to a constant. Both
