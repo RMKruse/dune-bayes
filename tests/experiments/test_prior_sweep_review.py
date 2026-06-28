@@ -16,6 +16,7 @@ from experiments.publication.prior_sweep_review import (
     materialize_confirmatory_configs,
     prior_sweep_commands,
     summarize_prior_sweep_outputs,
+    validate_prior_sweep_decision,
 )
 
 DECISION = Path("experiments/publication/prior-smoothness-calibration-decision.yaml")
@@ -322,9 +323,7 @@ def test_no_promotion_decision_preserves_canonical_publication_evidence() -> Non
     """The reviewed prior/smoothness branch records no promotion for #163."""
     decision = yaml.safe_load(DECISION.read_text(encoding="utf-8"))
     manifest = yaml.safe_load(EVIDENCE_MANIFEST.read_text(encoding="utf-8"))
-    normal_config = yaml.safe_load(
-        NORMAL_CANONICAL_CONFIG.read_text(encoding="utf-8")
-    )
+    normal_config = yaml.safe_load(NORMAL_CANONICAL_CONFIG.read_text(encoding="utf-8"))
 
     assert decision["status"] == "no_promotion"
     assert decision["reviewed_against"] == (
@@ -344,3 +343,33 @@ def test_no_promotion_decision_preserves_canonical_publication_evidence() -> Non
     )
     assert normal_config["architecture"]["prior_scale"] == 1.0
     assert decision["canonical_artifact"] == normal_evidence["path"]
+
+
+def test_checked_in_no_promotion_decision_is_publication_ready() -> None:
+    """The reviewed #163 outcome is a complete checked-in decision record."""
+    report = validate_prior_sweep_decision(DECISION)
+
+    assert report.ready is True
+    assert report.failures == ()
+
+
+def test_no_promotion_decision_requires_fixed_3p0_guardrail_rationale(
+    tmp_path: Path,
+) -> None:
+    """The best coverage candidate must record why it was not promoted."""
+    decision = yaml.safe_load(DECISION.read_text(encoding="utf-8"))
+    for candidate in decision["review_summary"]["rejected_candidates"]:
+        if candidate["run_name"] == "prior-sweep-normal-fixed-3p0":
+            candidate["reason"] = "Lower effect-band coverage error."
+    decision_path = tmp_path / "decision.yaml"
+    decision_path.write_text(
+        yaml.safe_dump(decision, sort_keys=False), encoding="utf-8"
+    )
+
+    report = validate_prior_sweep_decision(decision_path, root=Path("."))
+
+    assert report.ready is False
+    assert (
+        "review_summary must record the fixed 3.0 intercept-coverage rejection"
+        in report.failures
+    )
