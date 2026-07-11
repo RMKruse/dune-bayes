@@ -1,0 +1,2 @@
+dataset,family,model,n_test,mean_nll
+autompg,normal,dune_bayes,78,5.430565030700721

@@ -35,3 +35,11 @@ doi_deposit:
     - final paper/preprint citation and author order
     - Zenodo metadata, DOI reservation, and record visibility
     - exact release date and target commit
+release_freeze:
+  bounded_audit: ready
+  full_canonical_reruns: manual
+  human_approval: pending
+  remaining_release_blockers:
+    - issue: 136
+      title: Public CI activation
+      status: open

@@ -1,0 +1,8 @@
+claim_id,family,requires,artifact_class,path,experiment,seed
+central-disentanglement,disentanglement,full,simulation,experiments/disentanglement/results/canonical,disentanglement,9901
+per-feature-per-parameter-epistemic-bands,epistemic_bands,full,simulation,experiments/parameter_recovery/results/canonical-normal,parameter_recovery_normal,9801
+per-feature-per-parameter-epistemic-bands,epistemic_bands,full,simulation,experiments/parameter_recovery/results/canonical-student-t,parameter_recovery_student_t,9802
+per-feature-per-parameter-epistemic-bands,epistemic_bands,full,simulation,experiments/parameter_recovery/results/canonical-gamma,parameter_recovery_gamma,9803
+per-feature-per-parameter-epistemic-bands,epistemic_bands,full,simulation,experiments/jsu_showcase/results/canonical,jsu_showcase,10001
+vi-vs-nuts-limitation,vi_vs_nuts_limitation,full,validation,experiments/hmc_agreement/results/canonical,hmc_agreement,101
+benchmark-comparator-panel,benchmark_comparator,full,real_data_benchmark,experiments/uci_benchmark/results/canonical,uci_benchmark,102

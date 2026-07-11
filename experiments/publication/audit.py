@@ -262,7 +262,14 @@ def _default_commands(root: Path) -> tuple[AuditCommand, ...]:
         AuditCommand(
             name="experiment harness tests",
             category="experiment_smoke",
-            command=("uv", "run", "pytest", "-q", "-m", "experiment"),
+            command=(
+                "uv",
+                "run",
+                "pytest",
+                "-q",
+                "-m",
+                "experiment and not full_experiment",
+            ),
         ),
         AuditCommand(
             name="HMC agreement smoke tests",

@@ -64,7 +64,7 @@ jobs:
           done
 
       - name: Run experiment-harness tests
-        run: uv run pytest -q -m experiment
+        run: uv run pytest -q -m "experiment and not full_experiment"
 
       - name: Run HMC agreement tests
         run: uv run pytest -q -m hmc

@@ -49,6 +49,7 @@ testpaths = ["tests"]
 addopts = "-m 'not hmc and not experiment'"
 markers = [
     "experiment: opt-in full paper experiments and harness tests excluded from the core suite",
+    "full_experiment: manual full canonical reruns excluded from bounded audits",
     "hmc: opt-in NumPyro/NUTS validation tests requiring experiment dependencies",
 ]
 

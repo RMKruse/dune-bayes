@@ -1,0 +1,316 @@
+{
+  "benchmark_gate": {
+    "failures": [],
+    "manifest": "experiments/uci_benchmark/results/canonical/benchmark-claims.yaml",
+    "ready": true,
+    "stdout": [
+      "benchmark-comparator-panel: ready"
+    ]
+  },
+  "bounded_scope": {
+    "benchmark_publication_gate": "automated",
+    "canonical_evidence_validation": "automated",
+    "core_package_checks": "automated",
+    "experiment_smokes": "automated",
+    "full_canonical_reruns": "manual",
+    "paper_artifact_assembly": "automated"
+  },
+  "caveats": [
+    "Full canonical experiment reruns are manual",
+    "The bounded audit regenerates smoke outputs and paper artifacts only",
+    "Promoted canonical evidence remains the reviewed source for paper claims"
+  ],
+  "checks": [
+    {
+      "category": "core_package",
+      "command": [
+        "uv",
+        "run",
+        "ruff",
+        "format",
+        "--check",
+        "src",
+        "tests",
+        "experiments"
+      ],
+      "name": "ruff format",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": "145 files already formatted"
+    },
+    {
+      "category": "core_package",
+      "command": [
+        "uv",
+        "run",
+        "ruff",
+        "check",
+        "src",
+        "tests",
+        "experiments"
+      ],
+      "name": "ruff lint",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": "All checks passed!"
+    },
+    {
+      "category": "core_package",
+      "command": [
+        "uv",
+        "run",
+        "mypy",
+        "src/dune_bayes"
+      ],
+      "name": "mypy",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": "Success: no issues found in 43 source files"
+    },
+    {
+      "category": "core_package",
+      "command": [
+        "uv",
+        "run",
+        "pytest",
+        "-q"
+      ],
+      "name": "pytest core",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": "........................................................................ [ 13%]\n........................................................................ [ 26%]\n........................................................................ [ 39%]\n........................................................................ [ 52%]\n........................................................................ [ 66%]\n........................................................................ [ 79%]\n........................................................................ [ 92%]\n.........................................                                [100%]\n=============================== warnings summary ===============================\ntests/compare/test_comparison.py::test_loo_returns_elpd_data\ntests/compare/test_comparison.py::test_loo_elpd_matches_arviz_reference\ntests/compare/test_comparison.py::test_loo_elpd_matches_arviz_reference\ntests/compare/test_comparison.py::test_compare_returns_dataframe\ntests/compare/test_comparison.py::test_compare_ranks_models_correctly\ntests/compare/test_comparison.py::test_compare_ranks_models_correctly\ntests/families/test_families_end_to_end.py::TestStudentTFamilyEndToEnd::test_loo_runs_with_student_t\n  /Users/entropy/Git/dune-bayes/.venv/lib/python3.12/site-packages/arviz_stats/loo/helper_loo.py:1146: UserWarning: Estimated shape parameter of Pareto distribution is greater than 0.41 for one or more samples. You should consider using a more robust model, this is because importance sampling is less likely to work well if the marginal posterior and LOO posterior are very different. This is more likely to happen with a non-robust model and highly influential observations.\n    warnings.warn(\n\n-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html\n545 passed, 105 deselected, 7 warnings in 10.96s"
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "experiments/disentanglement/run.py",
+        "experiments/disentanglement/config.yaml",
+        "--smoke"
+      ],
+      "name": "disentanglement smoke",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "experiments/hmc_agreement/run.py",
+        "experiments/hmc_agreement/config.yaml",
+        "--smoke"
+      ],
+      "name": "hmc_agreement smoke",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "experiments/jsu_showcase/run.py",
+        "experiments/jsu_showcase/config.yaml",
+        "--smoke"
+      ],
+      "name": "jsu_showcase smoke",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "experiments/parameter_recovery/run.py",
+        "experiments/parameter_recovery/config-gamma.yaml",
+        "--smoke"
+      ],
+      "name": "parameter_recovery smoke",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "experiments/parameter_recovery/run.py",
+        "experiments/parameter_recovery/config-normal.yaml",
+        "--smoke"
+      ],
+      "name": "parameter_recovery smoke",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "experiments/parameter_recovery/run.py",
+        "experiments/parameter_recovery/config-student-t.yaml",
+        "--smoke"
+      ],
+      "name": "parameter_recovery smoke",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "experiments/uci_benchmark/run.py",
+        "experiments/uci_benchmark/config.yaml",
+        "--smoke"
+      ],
+      "name": "uci_benchmark smoke",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "python",
+        "experiments/walking_skeleton/run.py",
+        "experiments/walking_skeleton/config.yaml",
+        "--smoke"
+      ],
+      "name": "walking_skeleton smoke",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "-m",
+        "experiment and not full_experiment"
+      ],
+      "name": "experiment harness tests",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": "........................................................................ [ 69%]\n................................                                         [100%]\n104 passed, 546 deselected in 156.79s (0:02:36)"
+    },
+    {
+      "category": "experiment_smoke",
+      "command": [
+        "uv",
+        "run",
+        "pytest",
+        "-q",
+        "-m",
+        "hmc"
+      ],
+      "name": "HMC agreement smoke tests",
+      "returncode": 0,
+      "status": "pass",
+      "stderr_tail": "",
+      "stdout_tail": "...                                                                      [100%]\n3 passed, 647 deselected in 5.62s"
+    }
+  ],
+  "dependency_readiness": {
+    "failures": [],
+    "groups": {
+      "dev": [
+        "mypy",
+        "pandas-stubs",
+        "pytest",
+        "pyyaml",
+        "ruff",
+        "scipy-stubs"
+      ],
+      "experiments": [
+        "jax",
+        "numpyro",
+        "pyyaml",
+        "ucimlrepo"
+      ]
+    },
+    "install_command": "uv sync --locked --extra dev --extra experiments",
+    "lockfile": "uv.lock",
+    "ready": true
+  },
+  "evidence_manifest": {
+    "claim_count": 4,
+    "failures": [],
+    "manifest": "experiments/publication/evidence-manifest.yaml",
+    "ready": true
+  },
+  "failures": [],
+  "generated_at": "2026-07-11T16:35:14+00:00",
+  "paper_artifacts": {
+    "failures": [],
+    "outputs": [
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/central-disentanglement__disentanglement.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/per-feature-per-parameter-epistemic-bands__canonical-normal__recovery.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/per-feature-per-parameter-epistemic-bands__canonical-normal__calibration.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/per-feature-per-parameter-epistemic-bands__canonical-student-t__recovery.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/per-feature-per-parameter-epistemic-bands__canonical-student-t__calibration.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/per-feature-per-parameter-epistemic-bands__canonical-gamma__recovery.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/per-feature-per-parameter-epistemic-bands__canonical-gamma__calibration.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/per-feature-per-parameter-epistemic-bands__effect_ribbons.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/figures/vi-vs-nuts-limitation__vi_vs_nuts.pdf",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/per-feature-per-parameter-epistemic-bands__canonical-normal__calibration.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/per-feature-per-parameter-epistemic-bands__canonical-normal__intercept_coverage.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/per-feature-per-parameter-epistemic-bands__canonical-student-t__calibration.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/per-feature-per-parameter-epistemic-bands__canonical-student-t__intercept_coverage.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/per-feature-per-parameter-epistemic-bands__canonical-gamma__calibration.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/per-feature-per-parameter-epistemic-bands__canonical-gamma__intercept_coverage.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/per-feature-per-parameter-epistemic-bands__coverage.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/per-feature-per-parameter-epistemic-bands__canonical__intercept_coverage.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/vi-vs-nuts-limitation__parameter_intervals.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/vi-vs-nuts-limitation__band_width_ratios.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/benchmark-comparator-panel__comparison.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/benchmark-comparator-panel__autompg__nll.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/benchmark-comparator-panel__autompg__crps.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/benchmark-comparator-panel__autompg__calibration.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/benchmark-comparator-panel__autompg__variance_split.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/benchmark-comparator-panel__naval__nll.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/benchmark-comparator-panel__bike__nll.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/tables/evidence-summary.csv",
+      "experiments/publication/reproducibility-audit/paper-artifacts/provenance.json",
+      "experiments/publication/reproducibility-audit/paper-artifacts/artifact-metadata.yaml",
+      "experiments/publication/reproducibility-audit/paper-artifacts/reviewer-evidence-appendix.md"
+    ],
+    "ready": true
+  },
+  "root": ".",
+  "status": "ready"
+}

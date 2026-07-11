@@ -1,0 +1,17 @@
+parameter,nominal,empirical_coverage
+skew,0.5,0.345
+skew,0.8,0.865
+skew,0.9,0.96
+skew,0.95,1.0
+tail,0.5,0.265
+tail,0.8,0.515
+tail,0.9,0.71
+tail,0.95,0.835
+loc,0.5,0.395
+loc,0.8,0.56
+loc,0.9,0.68
+loc,0.95,0.87
+scale,0.5,0.145
+scale,0.8,0.555
+scale,0.9,0.75
+scale,0.95,0.865

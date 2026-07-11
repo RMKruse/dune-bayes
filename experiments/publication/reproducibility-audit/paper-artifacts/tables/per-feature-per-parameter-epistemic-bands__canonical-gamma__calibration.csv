@@ -1,0 +1,9 @@
+parameter,nominal,empirical_coverage
+concentration,0.5,0.2421875
+concentration,0.8,0.48046875
+concentration,0.9,0.65625
+concentration,0.95,0.96875
+rate,0.5,0.38671875
+rate,0.8,0.75390625
+rate,0.9,0.83984375
+rate,0.95,0.9140625

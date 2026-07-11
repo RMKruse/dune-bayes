@@ -724,13 +724,36 @@ def test_full_panel_is_opt_in_while_ci_discovers_the_smoke_config() -> None:
     pytest_config = project["tool"]["pytest"]["ini_options"]
     workflow = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
 
-    assert pytest_config["addopts"] == "-m 'not experiment'"
+    assert pytest_config["addopts"] == "-m 'not hmc and not experiment'"
     assert any(marker.startswith("experiment:") for marker in pytest_config["markers"])
     assert "for config in experiments/*/config*.yaml" in workflow
     assert '"$config" --smoke' in workflow
 
 
+def test_bounded_experiment_selector_excludes_full_panel() -> None:
+    """The audit selector collects smoke checks without full canonical reruns."""
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--collect-only",
+            "-q",
+            "-m",
+            "experiment and not full_experiment",
+            "tests/experiments/test_uci_benchmark.py",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "test_full_panel_writes_every_dataset_table" not in completed.stdout
+
+
 @pytest.mark.experiment
+@pytest.mark.full_experiment
 def test_full_panel_writes_every_dataset_table(tmp_path: Path) -> None:
     """The opt-in run downloads, fits, and scores the complete declared panel."""
     config_path = _smoke_config(tmp_path)

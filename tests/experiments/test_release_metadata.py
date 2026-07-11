@@ -68,6 +68,33 @@ def test_release_metadata_ties_tag_to_audit_and_publication_docs() -> None:
     assert "audit-report.json" in archiving
 
 
+def test_release_freeze_records_ready_audit_and_remaining_approvals() -> None:
+    """The checked-in freeze state separates automation from human release gates."""
+    metadata = yaml.safe_load(
+        Path("experiments/publication/release-metadata.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    freeze = metadata["release_freeze"]
+
+    assert freeze["bounded_audit"] == "ready"
+    assert freeze["full_canonical_reruns"] == "manual"
+    assert freeze["human_approval"] == "pending"
+    assert freeze["remaining_release_blockers"] == [
+        {
+            "issue": 136,
+            "title": "Public CI activation",
+            "status": "open",
+        }
+    ]
+
+    audit = metadata["release"]["reproducibility_audit"]
+    machine_report = Path(audit["machine_report"])
+    human_report = Path(audit["human_report"])
+    assert machine_report.is_file()
+    assert human_report.is_file()
+
+
 def test_readme_citation_text_matches_release_metadata_state() -> None:
     """README citation guidance agrees with the pending paper release state."""
     readme = Path("README.md").read_text(encoding="utf-8")

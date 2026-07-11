@@ -68,6 +68,6 @@ def test_reader_tutorial_snippets_are_smoke_or_illustrative() -> None:
     text = TUTORIAL.read_text(encoding="utf-8")
 
     for block in _python_blocks(text):
-        assert (
-            "# docs-smoke: reader-workflow" in block or "# illustrative:" in block
-        ), block
+        assert "# docs-smoke: reader-workflow" in block or "# illustrative:" in block, (
+            block
+        )

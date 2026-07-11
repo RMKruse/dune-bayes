@@ -72,5 +72,8 @@ def test_slow_suites_are_opt_in_and_covered_by_the_experiment_job() -> None:
     assert pytest_config["addopts"] == "-m 'not hmc and not experiment'"
     assert any(marker.startswith("hmc:") for marker in pytest_config["markers"])
     assert any(marker.startswith("experiment:") for marker in pytest_config["markers"])
-    assert "pytest -q -m experiment" in workflow
+    assert any(
+        marker.startswith("full_experiment:") for marker in pytest_config["markers"]
+    )
+    assert 'pytest -q -m "experiment and not full_experiment"' in workflow
     assert "pytest -q -m hmc" in workflow

@@ -54,9 +54,12 @@ def test_slow_suites_are_registered_opt_in_and_ci_covered() -> None:
     assert pytest_config["addopts"] == "-m 'not hmc and not experiment'"
     assert any(marker.startswith("hmc:") for marker in pytest_config["markers"])
     assert any(marker.startswith("experiment:") for marker in pytest_config["markers"])
+    assert any(
+        marker.startswith("full_experiment:") for marker in pytest_config["markers"]
+    )
     assert "uv run pytest -q" in workflow
     assert "uv run pytest -q -m hmc" in workflow
-    assert "uv run pytest -q -m experiment" in workflow
+    assert 'uv run pytest -q -m "experiment and not full_experiment"' in workflow
 
 
 def test_pytest_marker_selection_makes_experiments_opt_in() -> None:
