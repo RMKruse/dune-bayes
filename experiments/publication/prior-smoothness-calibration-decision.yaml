@@ -4,6 +4,12 @@ status: no_promotion
 decision_date: 2026-06-28
 reviewed_against: docs/issues/0028-prior-smoothness-calibration-sweep.md
 screening_summary: experiments/parameter_recovery/runs/prior-sweep-review-9801/screening_summary.json
+confirmatory_review:
+  status: not_run_no_candidate
+  github_issue: 162
+  rationale: >
+    No candidate survived screening, so there was no confirmatory seed evidence
+    to review and GitHub issue 162 was closed as not planned.
 paper_results_notebook: experiments/publication/paper_results_explorer.ipynb
 artifact_builder: experiments/publication/artifacts.py
 publication_evidence_manifest: experiments/publication/evidence-manifest.yaml
