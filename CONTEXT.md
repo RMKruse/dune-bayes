@@ -211,6 +211,37 @@ secondary, biased evidence proxy. No literal Bayes Factors (ADR-0001).
   sacrificing effect-band calibration or interpretability; it does not require
   universal predictive dominance. Avoid the ambiguous shorthand
   **performance**, which may instead mean runtime or throughput.
+- **Fair benchmark** — a predictive-competitiveness comparison that gives each
+  model class the same predeclared tuning opportunity on each dataset. Parameter
+  count and compute are reported as context, not forced to match across
+  structurally different model classes; package-default selection is a separate
+  decision.
+- **Development panel** — benchmark splits whose outcomes may be inspected while
+  diagnosing failures and selecting candidate improvements. Results from this
+  panel guide development but do not provide untouched confirmatory evidence.
+- **Confirmatory panel** — predeclared benchmark splits kept uninspected until
+  the model and training contract is locked, then evaluated once for the paper
+  claim.
+- **Reference prior** — the fixed prior configuration used to keep benchmark
+  comparisons anchored to existing calibration evidence. It is a comparison
+  reference, not a claim that one prior is appropriate for every dataset.
+- **Prior-sensitivity study** — a development-panel analysis of predeclared
+  prior-scale tiers across datasets. It may motivate a data-adaptive prior
+  selection rule, but individual outcomes are not manually promoted into the
+  confirmatory benchmark.
+- **Benchmark response transform** — a response transformation fitted only on
+  training rows and applied identically across compared models. Predictions and
+  densities are returned to the original response scale for scoring; bounded
+  and count families remain on their native support.
+- **Family-matched baseline** — a comparator that uses the same response family
+  and parameter links as DUNE, so likelihood scores share the same probability
+  measure. Its global deterministic architecture or ensemble construction may
+  differ; a mean-only Gaussian residual model is supplemental rather than
+  family-matched on non-Gaussian datasets.
+- **Deterministic additive baseline** — a family-matched NAMLSS model with the
+  same additive shape-function skeleton as DUNE but point-estimated weights and
+  zero shape-function KL. Its contrast with DUNE isolates the combined effect
+  of variational weights, priors, and KL more closely than a global MLP can.
 - **MC sample counts (`T_predict` / `T_eval`)** — the number of posterior weight
   draws is split by consumer, because information criteria are far more sensitive
   to low `T` than plots are. **`T_predict = 200`** is the default for
