@@ -205,6 +205,12 @@ secondary, biased evidence proxy. No literal Bayes Factors (ADR-0001).
   per-feature contribution samples (effect bands, goal 1), summed-predictor
   samples, and pointwise log-likelihood samples (WAIC/LOO, goal 3). `call()`
   stays a single stochastic pass (one MC sample of the ELBO per training step).
+- **Predictive competitiveness** — relative held-out NLL, CRPS, and PIT
+  calibration against declared baselines under shared data splits, scoring, and
+  tuning budgets. Improvement means materially closing the baseline gap without
+  sacrificing effect-band calibration or interpretability; it does not require
+  universal predictive dominance. Avoid the ambiguous shorthand
+  **performance**, which may instead mean runtime or throughput.
 - **MC sample counts (`T_predict` / `T_eval`)** — the number of posterior weight
   draws is split by consumer, because information criteria are far more sensitive
   to low `T` than plots are. **`T_predict = 200`** is the default for
