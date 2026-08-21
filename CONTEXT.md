@@ -211,6 +211,62 @@ secondary, biased evidence proxy. No literal Bayes Factors (ADR-0001).
   sacrificing effect-band calibration or interpretability; it does not require
   universal predictive dominance. Avoid the ambiguous shorthand
   **performance**, which may instead mean runtime or throughput.
+- **Predictive-gain evidence tiers** — a non-binary interpretation of baseline-gap
+  closure. Roughly 50% closure anchors **strong** evidence; 25% to 50% anchors
+  **material** evidence; smaller positive movement is **suggestive**. These are
+  review bands, not automatic pass/fail cutoffs: breadth across datasets,
+  stability across seeds, and uncertainty guardrails determine the defensible
+  claim. Gap closure is computed per dataset and metric from the reference DUNE
+  configuration toward the better family-matched global comparator (plain MLP
+  or deep ensemble). Deterministic additive NAMLSS is a diagnostic contrast for
+  separating additivity from variational inference, not the gap target. Evidence
+  is aggregated dataset-first: each dataset's closure is the median of its three
+  confirmatory runs. Positive movement on roughly 8/10 datasets anchors strong
+  breadth and 6/10 anchors material breadth; improvement on at least 2/3 runs
+  anchors seed stability. These counts inform the tier rather than acting as
+  isolated hard stops. Strong predictive-gain evidence requires both NLL and
+  CRPS to reach the strong region. Material evidence may be carried by one when
+  the other is broadly non-regressing: median closure is at least `-10%`, and at
+  least 6/10 datasets are within that band or improve. An already-competitive
+  dataset is preserved only while the candidate continues to match or beat the
+  stronger comparator. A material regression or unstable result on the other
+  metric makes the evidence mixed rather than material. Ten-bin
+  mean absolute PIT calibration error uses absolute anchors on its shared
+  `0`–`0.18` scale: a reduction near `0.02` is strong, a reduction near `0.01`
+  is material, and movement within about `±0.01` is practically equivalent.
+  Saturation at `0.18` in a confirmatory run is a failed configuration, not a
+  successful fit. A predictive configuration is non-regressing on epistemic
+  effect-band calibration when its mean absolute coverage error is within
+  `0.02` of the calibration branch's accepted reference and no individual
+  parameter/nominal-level coverage error worsens by more than `0.05`; centered
+  recovery and intercept coverage remain human-review diagnostics. For
+  VI-to-NUTS agreement, an effect-band width ratio may not fall more than `0.05`
+  below the accepted reference; movement toward `1.0` is improvement, while a
+  ratio above `1.25` triggers over-width review. Median normalized center
+  difference must remain at or below `0.10`. Interpretability is a structural
+  guardrail: every declared formula term retains a separately inspectable effect
+  for every distributional parameter; intercept plus term contributions
+  reconstruct the additive predictor within `1e-5`; effect centers and
+  epistemic bands remain reportable on the original covariate scale; and no
+  hidden global residual network contributes to DUNE's predictor. Explicitly
+  declared interactions remain allowed. Numerical stability is a zero-tolerance
+  promotion guardrail: selected evaluation fits and every reported predictive,
+  coverage, and width value are finite; family extreme-pre-link `log_prob`
+  gates and complete KL accounting remain valid; and invalid distribution
+  parameters are never accepted. A non-finite selected fit is a failed run even
+  when its process exits successfully. A selected development configuration may
+  carry at most `1/30` failed dataset-seed evaluations for further investigation;
+  locked confirmation evidence requires `0/30` failures. Failed tuning trials
+  consume their predeclared slots and are reported separately without adaptive
+  replacement. Process failure, missing evidence artifacts, non-finite metrics,
+  and saturated PIT all count as failed runs.
+- **Gap closure** — for a lower-is-better predictive metric, the fraction of the
+  reference DUNE deficit to the stronger comparator removed by a candidate,
+  computed only when that reference deficit is positive. Positive closure is
+  capped at `100%` for aggregation and comparator wins are reported separately.
+  When reference DUNE already matches or beats the comparator, the dataset is
+  **already competitive** and is evaluated for preservation rather than assigned
+  a misleading closure percentage.
 - **Fair benchmark** — a predictive-competitiveness comparison that gives each
   model class the same predeclared tuning opportunity on each dataset. Parameter
   count and compute are reported as context, not forced to match across
