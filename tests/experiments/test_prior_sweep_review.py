@@ -333,6 +333,8 @@ def test_no_promotion_decision_preserves_canonical_publication_evidence() -> Non
         "experiments/parameter_recovery/runs/prior-sweep-review-9801/"
         "screening_summary.json"
     )
+    assert decision["confirmatory_review"]["status"] == "not_run_no_candidate"
+    assert decision["confirmatory_review"]["github_issue"] == 162
     assert decision["follow_up"] == "last-layer richer posterior / low-rank covariance"
     assert decision["unchanged_defaults"]["package_defaults"] is True
     assert decision["unchanged_defaults"]["benchmark_configs"] is True
