@@ -1,4 +1,4 @@
-"""UCI benchmark panel runner and scoring (ADR-0008, GitHub #102–#103, #176)."""
+"""UCI benchmark panel runner and scoring (ADR-0008, GitHub #102–#103, #176–#177)."""
 
 from __future__ import annotations
 
@@ -36,15 +36,17 @@ from dune_bayes.metrics import (  # noqa: E402
     variance_decomposition,
 )
 from dune_bayes.model import BayesianNAMLSS  # noqa: E402
-from dune_bayes.shapes import BayesianMLP  # noqa: E402
+from dune_bayes.shapes import BayesianMLP, DeterministicMLP  # noqa: E402
 from dune_bayes.utils import EPS  # noqa: E402
 from experiments.uci_benchmark.adapters import (  # noqa: E402
     BamlssFixtureAdapter,
     BayesNamStyleAdapter,
     BenchmarkAdapter,
     DeepEnsembleAdapter,
+    DeterministicNamlssAdapter,
     DuneBayesAdapter,
     LANAMAdapter,
+    MeanOnlyGaussianAdapter,
     NampyNamlssAdapter,
     PlainMLPAdapter,
     PredictiveResult,
@@ -214,12 +216,29 @@ def _build_dune_bayes_model(
     config: Mapping[str, Any],
     *,
     location_only: bool = False,
+    deterministic: bool = False,
 ) -> BayesianNAMLSS:
-    """Build a configured first-party Bayesian additive model."""
+    """Build the configured Bayesian or point-estimated additive model."""
     hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
     prior_scale = float(config["architecture"]["prior_scale"])
     activation = str(config["architecture"]["activation"])
-    if location_only:
+    if deterministic:
+        formula = {
+            feature: DeterministicMLP(
+                1,
+                family.param_count,
+                hidden_dims=hidden_dims,
+                activation=activation,
+            )
+            for feature in train_data.features
+        }
+        model = BayesianNAMLSS(
+            formula=formula,
+            family=family,
+            n_obs=train_data.n_obs,
+            intercept_mode="point",
+        )
+    elif location_only:
         formula = {
             feature: _LocationOnlyShape(
                 BayesianMLP(
@@ -234,28 +253,29 @@ def _build_dune_bayes_model(
             )
             for feature in train_data.features
         }
-        return BayesianNAMLSS(
+        model = BayesianNAMLSS(
             formula=formula,
             family=family,
             n_obs=train_data.n_obs,
             intercept_mode="point",
         )
-    formula = {
-        feature: BayesianMLP(
-            1,
-            family.param_count,
-            hidden_dims=hidden_dims,
-            prior_scale=prior_scale,
-            kl_divisor=train_data.n_obs,
-            activation=activation,
+    else:
+        formula = {
+            feature: BayesianMLP(
+                1,
+                family.param_count,
+                hidden_dims=hidden_dims,
+                prior_scale=prior_scale,
+                kl_divisor=train_data.n_obs,
+                activation=activation,
+            )
+            for feature in train_data.features
+        }
+        model = BayesianNAMLSS(
+            formula=formula,
+            family=family,
+            n_obs=train_data.n_obs,
         )
-        for feature in train_data.features
-    }
-    model = BayesianNAMLSS(
-        formula=formula,
-        family=family,
-        n_obs=train_data.n_obs,
-    )
     if isinstance(family, NegativeBinomialFamily):
         target = train_data.target
         mean = target.mean()
@@ -281,7 +301,7 @@ def _score_dataset(
     *,
     smoke: bool,
 ) -> list[dict[str, object]]:
-    """Fit dune-bayes and write held-out headline metrics."""
+    """Fit the family-matched panel and write held-out headline metrics."""
     name = str(dataset["name"])
     cache_key = _cache_key(dataset, smoke=smoke)
     frame = pd.read_csv(_data_path(config, "cache_dir") / f"{cache_key}.csv")
@@ -327,6 +347,37 @@ def _score_dataset(
         if smoke
         else int(config["predictive_samples"])
     )
+    comparison: list[dict[str, object]] = []
+
+    def score(
+        adapter: BenchmarkAdapter,
+        scored_family: str,
+        metric_dir: Path | None = None,
+    ) -> PredictiveResult:
+        """Fit and score one adapter through the shared contract."""
+        adapter.fit(train_data, smoke=smoke)
+        result = predict_on_original_scale(
+            adapter,
+            response_transform,
+            test_features,
+            test_target,
+            draws=draws_count,
+            predictive_samples=predictive_samples,
+            seed=int(dataset["split_seed"]),
+        )
+        comparison.extend(
+            _write_scores(
+                result,
+                adapter=adapter,
+                target=test_target,
+                dataset=name,
+                family=scored_family,
+                bins=int(config["calibration_bins"]),
+                metric_dir=metric_dir or paths.metrics / name / adapter.name,
+            )
+        )
+        return result
+
     adapter: BenchmarkAdapter = DuneBayesAdapter(
         model,
         family,
@@ -335,25 +386,7 @@ def _score_dataset(
         warmup_epochs=int(config["training"]["warmup_epochs"]),
         randomized_pit=family_name == "negative_binomial",
     )
-    adapter.fit(train_data, smoke=smoke)
-    prediction = predict_on_original_scale(
-        adapter,
-        response_transform,
-        test_features,
-        test_target,
-        draws=draws_count,
-        predictive_samples=predictive_samples,
-        seed=int(dataset["split_seed"]),
-    )
-    comparison = _write_scores(
-        prediction,
-        adapter=adapter,
-        target=test_target,
-        dataset=name,
-        family=family_name,
-        bins=int(config["calibration_bins"]),
-        metric_dir=paths.metrics / name,
-    )
+    prediction = score(adapter, family_name, paths.metrics / name)
     _write_dune_bayes_uncertainty(
         prediction,
         model=model,
@@ -362,6 +395,22 @@ def _score_dataset(
         metric_dir=paths.metrics / name,
         response_transform=response_transform,
     )
+
+    deterministic_model = _build_dune_bayes_model(
+        train_data,
+        family,
+        config,
+        deterministic=True,
+    )
+    deterministic: BenchmarkAdapter = DeterministicNamlssAdapter(
+        deterministic_model,
+        family,
+        epochs=int(config["training"]["epochs"]),
+        learning_rate=float(config["training"]["learning_rate"]),
+        warmup_epochs=0,
+        randomized_pit=family_name == "negative_binomial",
+    )
+    score(deterministic, family_name)
     bayesnam_config = config.get("baselines", {}).get("bayesnam_style", {})
     if bool(bayesnam_config.get("enabled", False)):
         if str(bayesnam_config["label"]) != BayesNamStyleAdapter.name:
@@ -385,27 +434,7 @@ def _score_dataset(
             warmup_epochs=int(config["training"]["warmup_epochs"]),
             randomized_pit=False,
         )
-        bayesnam.fit(train_data, smoke=smoke)
-        bayesnam_prediction = predict_on_original_scale(
-            bayesnam,
-            response_transform,
-            test_features,
-            test_target,
-            draws=draws_count,
-            predictive_samples=predictive_samples,
-            seed=int(dataset["split_seed"]),
-        )
-        comparison.extend(
-            _write_scores(
-                bayesnam_prediction,
-                adapter=bayesnam,
-                target=test_target,
-                dataset=name,
-                family="normal_homoscedastic",
-                bins=int(config["calibration_bins"]),
-                metric_dir=paths.metrics / name / bayesnam.name,
-            )
-        )
+        bayesnam_prediction = score(bayesnam, "normal_homoscedastic")
         _write_bayesnam_band_contrast(
             prediction,
             bayesnam_prediction,
@@ -425,27 +454,7 @@ def _score_dataset(
             learning_rate=float(config["training"]["learning_rate"]),
             batch_size=int(namlss_config.get("batch_size", 512)),
         )
-        namlss.fit(train_data, smoke=smoke)
-        namlss_prediction = predict_on_original_scale(
-            namlss,
-            response_transform,
-            test_features,
-            test_target,
-            draws=draws_count,
-            predictive_samples=predictive_samples,
-            seed=int(dataset["split_seed"]),
-        )
-        comparison.extend(
-            _write_scores(
-                namlss_prediction,
-                adapter=namlss,
-                target=test_target,
-                dataset=name,
-                family=family_name,
-                bins=int(config["calibration_bins"]),
-                metric_dir=paths.metrics / name / namlss.name,
-            )
-        )
+        score(namlss, family_name)
     lanam_config = config.get("baselines", {}).get("lanam", {})
     if bool(lanam_config.get("enabled", False)):
         lanam: BenchmarkAdapter = LANAMAdapter(
@@ -456,27 +465,7 @@ def _score_dataset(
             learning_rate=float(config["training"]["learning_rate"]),
             batch_size=int(lanam_config.get("batch_size", 512)),
         )
-        lanam.fit(train_data, smoke=smoke)
-        lanam_prediction = predict_on_original_scale(
-            lanam,
-            response_transform,
-            test_features,
-            test_target,
-            draws=draws_count,
-            predictive_samples=predictive_samples,
-            seed=int(dataset["split_seed"]),
-        )
-        comparison.extend(
-            _write_scores(
-                lanam_prediction,
-                adapter=lanam,
-                target=test_target,
-                dataset=name,
-                family="mean_only_laplace_gaussian",
-                bins=int(config["calibration_bins"]),
-                metric_dir=paths.metrics / name / lanam.name,
-            )
-        )
+        score(lanam, "mean_only_laplace_gaussian")
     bamlss_config = config.get("baselines", {}).get("bamlss_reference", {})
     if bool(bamlss_config.get("enabled", False)):
         bamlss: BenchmarkAdapter = BamlssFixtureAdapter(
@@ -485,80 +474,32 @@ def _score_dataset(
             response_transform=response_transform,
             n_fit=train_data.n_obs,
         )
-        bamlss.fit(train_data, smoke=smoke)
-        bamlss_prediction = predict_on_original_scale(
-            bamlss,
-            response_transform,
-            test_features,
-            test_target,
-            draws=draws_count,
-            predictive_samples=predictive_samples,
-            seed=int(dataset["split_seed"]),
-        )
-        comparison.extend(
-            _write_scores(
-                bamlss_prediction,
-                adapter=bamlss,
-                target=test_target,
-                dataset=name,
-                family=family_name,
-                bins=int(config["calibration_bins"]),
-                metric_dir=paths.metrics / name / bamlss.name,
-            )
-        )
+        score(bamlss, family_name)
     plain: BenchmarkAdapter = PlainMLPAdapter(
+        family,
         hidden_dims=hidden_dims,
         epochs=int(config["training"]["epochs"]),
         learning_rate=float(config["training"]["learning_rate"]),
+        randomized_pit=family_name == "negative_binomial",
     )
-    plain.fit(train_data, smoke=smoke)
-    plain_prediction = predict_on_original_scale(
-        plain,
-        response_transform,
-        test_features,
-        test_target,
-        draws=draws_count,
-        predictive_samples=predictive_samples,
-        seed=int(dataset["split_seed"]),
-    )
-    comparison.extend(
-        _write_scores(
-            plain_prediction,
-            adapter=plain,
-            target=test_target,
-            dataset=name,
-            family="gaussian_residual",
-            bins=int(config["calibration_bins"]),
-            metric_dir=paths.metrics / name / plain.name,
-        )
-    )
+    score(plain, family_name)
     ensemble: BenchmarkAdapter = DeepEnsembleAdapter(
+        family,
         members=int(config["baselines"]["deep_ensemble_members"]),
         hidden_dims=hidden_dims,
         epochs=int(config["training"]["epochs"]),
         learning_rate=float(config["training"]["learning_rate"]),
+        randomized_pit=family_name == "negative_binomial",
     )
-    ensemble.fit(train_data, smoke=smoke)
-    ensemble_prediction = predict_on_original_scale(
-        ensemble,
-        response_transform,
-        test_features,
-        test_target,
-        draws=draws_count,
-        predictive_samples=predictive_samples,
-        seed=int(dataset["split_seed"]),
-    )
-    comparison.extend(
-        _write_scores(
-            ensemble_prediction,
-            adapter=ensemble,
-            target=test_target,
-            dataset=name,
-            family="gaussian_residual_mixture",
-            bins=int(config["calibration_bins"]),
-            metric_dir=paths.metrics / name / ensemble.name,
+    score(ensemble, family_name)
+    mean_only_config = config["baselines"].get("mean_only_gaussian", {})
+    if family_name == "normal" and bool(mean_only_config.get("enabled", False)):
+        mean_only: BenchmarkAdapter = MeanOnlyGaussianAdapter(
+            hidden_dims=hidden_dims,
+            epochs=int(config["training"]["epochs"]),
+            learning_rate=float(config["training"]["learning_rate"]),
         )
-    )
+        score(mean_only, "gaussian_residual")
     return comparison
 
 
@@ -749,6 +690,7 @@ def _write_scores(
     pit_values = prediction.cdf.to(torch.float64)
 
     summary = {
+        "comparison_role": adapter.comparison_role,
         "dataset": dataset,
         "family": family,
         "model": adapter.name,
@@ -780,6 +722,7 @@ def _write_scores(
     fractions = counts / len(target)
     return [
         {
+            "comparison_role": adapter.comparison_role,
             "dataset": dataset,
             "family": family,
             "model": adapter.name,

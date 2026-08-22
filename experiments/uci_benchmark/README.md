@@ -1,7 +1,7 @@
 # UCI benchmark panel
 
 This experiment is the dune-bayes side of the common UCI evaluation harness
-(ADR-0008, GitHub #102). The checked-in config pins the ten-dataset panel,
+(ADR-0008, GitHub #102/#177). The checked-in config pins the ten-dataset panel,
 catalog IDs, response families, split seeds, architecture, and evaluation
 budget. Auto MPG, concrete, energy, kin8nm, power, protein, wine, and yacht use
 the Normal family; bike counts use NegativeBinomial; naval's bounded decay
@@ -74,16 +74,22 @@ calibration. The runner owns all scoring and passes every adapter the same
 training `DataModule`, held-out feature tensors, targets, and persisted split.
 This keeps model-specific evaluation code out of comparison tables.
 
-The `dune_bayes`, `BayesNAM-style (our implementation)`, `plain_mlp`,
-`deep_ensemble`, optional `nampy_namlss`, optional `lanam`, and optional
-`bamlss_reference` adapters prove the seam end-to-end.
+Rows in `metrics/comparison.csv` declare `comparison_role`. The primary panel is
+exactly `dune_bayes`, `deterministic_namlss`, `plain_mlp`, and the five-member
+`deep_ensemble`. All four use the configured Normal, Beta, or NegativeBinomial
+family and its package links. `deterministic_namlss` reuses DUNE's additive
+shape-function skeleton with point-estimated weights; `plain_mlp` and each
+ensemble member are global deterministic distributional MLPs.
+
+`BayesNAM-style (our implementation)`, `mean_only_gaussian`, optional
+`nampy_namlss`, optional `lanam`, and optional `bamlss_reference` remain
+supplemental adapters behind the same seam.
 `BayesNAM-style (our implementation)` is a labeled
 degenerate dune-bayes config: Bayesian shape functions contribute only to the
 Normal location parameter, while a point intercept learns one homoscedastic
-scale. The built-in PyTorch sanity floors are `plain_mlp` and `deep_ensemble`:
-each uses a homoscedastic Gaussian residual, and the ensemble mixes
-independently initialized MLP predictives. Those baselines do not provide
-dune-bayes's distributional separation of aleatoric family uncertainty from
+scale. `mean_only_gaussian` preserves the former homoscedastic Gaussian-residual
+sanity floor on continuous data only; it is never scored as a family-matched
+Beta or count comparator. Deterministic baselines do not provide DUNE's
 epistemic uncertainty on shape functions. Per-baseline tables live below
 `metrics/<dataset>/<model>/`; `metrics/comparison.csv` is the combined panel.
 When the BayesNAM-style baseline is enabled, the run also writes

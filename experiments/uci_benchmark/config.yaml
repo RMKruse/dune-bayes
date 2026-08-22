@@ -1,5 +1,10 @@
 experiment: uci_benchmark
 seed: 102
+primary_models:
+  - dune_bayes
+  - deterministic_namlss
+  - plain_mlp
+  - deep_ensemble
 datasets:
   - name: autompg
     family: normal
@@ -65,6 +70,8 @@ training:
   learning_rate: 0.01
   warmup_epochs: 20
 baselines:
+  mean_only_gaussian:
+    enabled: true
   bayesnam_style:
     enabled: true
     label: BayesNAM-style (our implementation)

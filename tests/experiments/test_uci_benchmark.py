@@ -1,4 +1,4 @@
-"""UCI benchmark panel boundaries (ADR-0008, GitHub #102–#103)."""
+"""UCI benchmark panel boundaries (ADR-0008, GitHub #102–#103/#175–#177)."""
 
 from __future__ import annotations
 
@@ -27,7 +27,16 @@ from dune_bayes.families import (
     NegativeBinomialFamily,
     NormalFamily,
 )
+from dune_bayes.layers import collect_kl
+from dune_bayes.metrics import crps, pit
 from dune_bayes.utils import EPS
+from experiments.uci_benchmark.adapters import (
+    DeepEnsembleAdapter,
+    PlainMLPAdapter,
+    PredictiveResult,
+    ResponseTransform,
+    predict_on_original_scale,
+)
 from experiments.uci_benchmark.run import _build_dune_bayes_model
 
 
@@ -90,6 +99,29 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
     """Read one public metric table."""
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+_PRIMARY_MODELS = (
+    "dune_bayes",
+    "deterministic_namlss",
+    "plain_mlp",
+    "deep_ensemble",
+)
+
+
+def _assert_primary_panel(
+    comparison: list[dict[str, str]], family: str
+) -> list[dict[str, str]]:
+    """Assert the shared finite four-model contract and return its rows."""
+    primary = [row for row in comparison if row["comparison_role"] == "primary"]
+    assert {row["model"] for row in primary} == set(_PRIMARY_MODELS)
+    assert {row["family"] for row in primary} == {family}
+    assert all(
+        np.isfinite(float(row[metric]))
+        for row in primary
+        for metric in ("mean_nll", "mean_crps", "calibration_error")
+    )
+    return primary
 
 
 def test_response_transform_restores_continuous_predictions_and_scores() -> None:
@@ -354,7 +386,7 @@ def test_smoke_writes_dune_bayes_parameter_bands_and_variance_split(
 def test_plain_mlp_is_scored_on_the_same_held_out_observations(
     tmp_path: Path,
 ) -> None:
-    """The conventional point predictor has a Gaussian predictive sanity floor."""
+    """The global distributional MLP and supplemental Gaussian share the split."""
     completed = _run_smoke(_smoke_config(tmp_path))
     assert completed.returncode == 0, completed.stderr
 
@@ -368,6 +400,9 @@ def test_plain_mlp_is_scored_on_the_same_held_out_observations(
     assert np.isfinite(float(plain["mean_nll"]))
     assert np.isfinite(float(plain["mean_crps"]))
     assert np.isfinite(float(plain["calibration_error"]))
+    supplemental = rows["mean_only_gaussian"]
+    assert supplemental["comparison_role"] == "supplemental"
+    assert supplemental["family"] == "gaussian_residual"
 
 
 def test_deep_ensemble_completes_the_built_in_sanity_panel(
@@ -380,15 +415,10 @@ def test_deep_ensemble_completes_the_built_in_sanity_panel(
     comparison = _read_rows(
         tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics" / "comparison.csv"
     )
-    assert {row["model"] for row in comparison} == {
-        "BayesNAM-style (our implementation)",
-        "dune_bayes",
-        "plain_mlp",
-        "deep_ensemble",
-    }
-    assert {row["dataset"] for row in comparison} == {"autompg"}
-    assert len({row["n_test"] for row in comparison}) == 1
-    ensemble = next(row for row in comparison if row["model"] == "deep_ensemble")
+    primary = _assert_primary_panel(comparison, "normal")
+    assert {row["dataset"] for row in primary} == {"autompg"}
+    assert len({row["n_test"] for row in primary}) == 1
+    ensemble = next(row for row in primary if row["model"] == "deep_ensemble")
     assert np.isfinite(float(ensemble["mean_nll"]))
     assert np.isfinite(float(ensemble["mean_crps"]))
     assert np.isfinite(float(ensemble["calibration_error"]))
@@ -785,6 +815,133 @@ def test_panel_config_declares_standard_datasets_and_response_families() -> None
     assert set(families.values()) == {"normal", "negative_binomial", "beta"}
 
 
+def test_panel_config_declares_exactly_four_family_matched_models() -> None:
+    """The primary comparison classes and ensemble size are reviewable data."""
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+
+    assert config["primary_models"] == list(_PRIMARY_MODELS)
+    assert config["baselines"]["deep_ensemble_members"] == 5
+
+
+def test_deterministic_namlss_has_zero_kl_through_the_additive_model_boundary() -> None:
+    """Point-estimated shape functions keep the shared additive contract."""
+    train_data = DataModule(
+        pd.DataFrame({"x1": [-1.0, 0.0, 1.0], "x2": [1.0, 0.0, -1.0], "y": [0, 1, 2]}),
+        response="y",
+        numeric_scaling={},
+    )
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+    model = _build_dune_bayes_model(
+        train_data,
+        NormalFamily(validate_args=True),
+        config,
+        deterministic=True,
+    )
+    model.eval()
+
+    first = model.predict_params(train_data.features)
+    second = model.predict_params(train_data.features)
+    # Point-estimated weights and intercept contain no sampling path, so repeat
+    # evaluation must be bit-identical rather than merely numerically close.
+    torch.testing.assert_close(first, second, rtol=0.0, atol=0.0)
+    assert float(collect_kl(model)) == 0.0
+
+
+@pytest.mark.parametrize(
+    ("family_name", "family", "target"),
+    [
+        ("normal", NormalFamily(validate_args=True), [-1.0, 0.0, 1.0, 2.0]),
+        ("beta", BetaFamily(validate_args=True), [0.2, 0.4, 0.6, 0.8]),
+        (
+            "negative_binomial",
+            NegativeBinomialFamily(validate_args=True),
+            [0.0, 1.0, 3.0, 6.0],
+        ),
+    ],
+)
+def test_global_distributional_mlp_obeys_each_family_contract(
+    family_name: str,
+    family: BaseFamily,
+    target: list[float],
+) -> None:
+    """Every global MLP output reaches family-linked density, samples, and PIT."""
+    train_data = DataModule(
+        pd.DataFrame({"x": [-1.0, -0.25, 0.25, 1.0], "y": target}),
+        response="y",
+        numeric_scaling={},
+    )
+    transform = ResponseTransform.fit(train_data.target, family=family_name)
+    original_target = train_data.target.clone()
+    train_data.target = transform.to_model_scale(train_data.target)
+    adapter = PlainMLPAdapter(
+        family,
+        hidden_dims=[4],
+        epochs=1,
+        learning_rate=0.01,
+        randomized_pit=family_name == "negative_binomial",
+    )
+    adapter.fit(train_data, smoke=True)
+    prediction = predict_on_original_scale(
+        adapter,
+        transform,
+        train_data.features,
+        original_target,
+        draws=2,
+        predictive_samples=4,
+        seed=12,
+    )
+
+    assert prediction.samples.shape == (4, 4)
+    assert prediction.parameter_draws is not None
+    assert prediction.parameter_draws.shape == (1, 4, family.param_count)
+    assert bool(torch.isfinite(prediction.samples).all())
+    assert bool(torch.isfinite(prediction.log_density).all())
+    assert bool(torch.isfinite(prediction.cdf).all())
+
+
+def test_count_ensemble_randomizes_pit_after_member_mixture() -> None:
+    """The count ensemble randomizes one predictive jump, not member jumps."""
+    family = NegativeBinomialFamily(validate_args=True)
+    train_data = DataModule(
+        pd.DataFrame({"x": [-1.0, -0.25, 0.25, 1.0], "y": [0, 1, 3, 6]}),
+        response="y",
+        numeric_scaling={},
+    )
+    adapter = DeepEnsembleAdapter(
+        family,
+        members=5,
+        hidden_dims=[4],
+        epochs=1,
+        learning_rate=0.01,
+        randomized_pit=True,
+    )
+    adapter.fit(train_data, smoke=True)
+    prediction = adapter.predict(
+        train_data.features,
+        train_data.target,
+        draws=2,
+        predictive_samples=7,
+        seed=12,
+    )
+
+    assert prediction.parameter_draws is not None
+    reference = pit(
+        family,
+        prediction.parameter_draws,
+        train_data.target,
+        randomized=True,
+        seed=12,
+    )
+    # Exact equality is expected because the adapter delegates to this shared
+    # PIT contract after assembling the same five parameter vectors.
+    torch.testing.assert_close(prediction.cdf, reference, rtol=0.0, atol=0.0)
+    assert prediction.samples.shape == (7, 4)
+
+
 def test_panel_config_declares_bayesnam_style_baseline() -> None:
     """The degenerate first-party baseline is enabled by plain config."""
     config = yaml.safe_load(
@@ -834,6 +991,9 @@ def test_count_dataset_runs_with_negative_binomial(tmp_path: Path) -> None:
         (metric_path.parent / "response_transform.json").read_text(encoding="utf-8")
     )
     assert metadata["method"] == "identity"
+    comparison = _read_rows(metric_path.parents[1] / "comparison.csv")
+    _assert_primary_panel(comparison, "negative_binomial")
+    assert "mean_only_gaussian" not in {row["model"] for row in comparison}
 
 
 def test_negative_binomial_candidate_intercepts_match_training_moments() -> None:
@@ -938,6 +1098,9 @@ def test_bounded_dataset_runs_with_beta(tmp_path: Path) -> None:
         (metric_path.parent / "response_transform.json").read_text(encoding="utf-8")
     )
     assert metadata["method"] == "identity"
+    comparison = _read_rows(metric_path.parents[1] / "comparison.csv")
+    _assert_primary_panel(comparison, "beta")
+    assert "mean_only_gaussian" not in {row["model"] for row in comparison}
 
 
 def test_full_run_downloads_once_then_uses_the_cache_offline(tmp_path: Path) -> None:

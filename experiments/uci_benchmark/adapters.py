@@ -1,8 +1,7 @@
-"""Common predictive adapter for benchmark models (ADR-0008, GitHub #103/#175).
+"""Common predictive adapter for benchmark models (ADR-0008, GitHub #103/#175/#177).
 
-Related approaches such as a plain MLP and deep ensemble are deliberately
-evaluated here as sanity floors: unlike dune-bayes, they do not model separate
-distributional aleatoric and effect-level epistemic uncertainty.
+The four primary adapters share family links and scoring; supplemental
+mean-only comparators remain labeled separately.
 """
 
 from __future__ import annotations
@@ -37,9 +36,9 @@ class PredictiveResult:
         log_density: Predictive log-density at each observed response, shape
             ``(n,)``.
         cdf: Predictive CDF at each observed response, shape ``(n,)``.
-        parameter_draws: Optional raw distribution-parameter draws with shape
-            ``(T, n, param_count)``. Only Bayesian adapters expose this; the
-            common scoring contract consumes the first three fields.
+        parameter_draws: Optional raw distribution-parameter vectors with shape
+            ``(T, n, param_count)``. ``T`` is posterior draws for DUNE, one for
+            a deterministic MLP, and ensemble members for the deep ensemble.
     """
 
     samples: torch.Tensor
@@ -158,9 +157,16 @@ class ResponseTransform:
 
 
 class BenchmarkAdapter(Protocol):
-    """Small interface shared by every benchmark model."""
+    """Small interface shared by every benchmark model.
+
+    Attributes:
+        name: Stable model label written to artifacts.
+        comparison_role: ``primary`` or ``supplemental`` panel role.
+        uncertainty_scope: Human-readable uncertainty capability label.
+    """
 
     name: str
+    comparison_role: str
     uncertainty_scope: str
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
@@ -216,6 +222,7 @@ class DuneBayesAdapter:
     """Expose ``BayesianNAMLSS`` through the benchmark prediction contract."""
 
     name = "dune_bayes"
+    comparison_role = "primary"
     uncertainty_scope = "distributional_parameter_bands"
 
     def __init__(
@@ -278,6 +285,18 @@ class DuneBayesAdapter:
         )
 
 
+class DeterministicNamlssAdapter(DuneBayesAdapter):
+    """Point-estimated additive NAMLSS behind the shared prediction contract.
+
+    Inherits the DUNE fit/predict path; its model contains deterministic shape
+    functions and a point intercept (GitHub #177).
+    """
+
+    name = "deterministic_namlss"
+    comparison_role = "primary"
+    uncertainty_scope = "deterministic_distributional"
+
+
 class BayesNamStyleAdapter(DuneBayesAdapter):
     """Labeled mean-only variational NAM baseline (ADR-0008, GitHub #106).
 
@@ -287,6 +306,7 @@ class BayesNamStyleAdapter(DuneBayesAdapter):
     """
 
     name = "BayesNAM-style (our implementation)"
+    comparison_role = "supplemental"
     uncertainty_scope = "mean_only_variational_location"
 
 
@@ -298,6 +318,7 @@ class BamlssFixtureAdapter:
     """
 
     name = "bamlss_reference"
+    comparison_role = "supplemental"
     uncertainty_scope = "distributional_bamlss_fixture"
 
     def __init__(
@@ -415,9 +436,11 @@ class BamlssFixtureAdapter:
 class _PlainMLP(torch.nn.Module):
     """Minimal point-estimate network used only by the experiment harness."""
 
-    def __init__(self, in_features: int, hidden_dims: list[int]) -> None:
+    def __init__(
+        self, in_features: int, out_features: int, hidden_dims: list[int]
+    ) -> None:
         super().__init__()
-        widths = [in_features, *hidden_dims, 1]
+        widths = [in_features, *hidden_dims, out_features]
         layers: list[torch.nn.Module] = []
         for index, (left, right) in enumerate(
             zip(widths[:-1], widths[1:], strict=True)
@@ -428,9 +451,9 @@ class _PlainMLP(torch.nn.Module):
         self.network = torch.nn.Sequential(*layers)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        """Return one point prediction per observation."""
+        """Return one raw distribution-parameter vector per observation."""
         out: torch.Tensor = self.network(features)
-        return out.squeeze(-1)
+        return out
 
 
 def _feature_matrix(features: Mapping[str, torch.Tensor]) -> torch.Tensor:
@@ -439,9 +462,117 @@ def _feature_matrix(features: Mapping[str, torch.Tensor]) -> torch.Tensor:
 
 
 class PlainMLPAdapter:
-    """Point-estimate MLP with a fitted homoscedastic Gaussian residual."""
+    """Global point-estimate MLP emitting every configured family parameter.
+
+    Args:
+        family: Dataset response family and parameter links.
+        hidden_dims: Hidden-layer widths.
+        epochs: Full-run training epochs.
+        learning_rate: Adam learning rate.
+        randomized_pit: Whether to randomize PIT on discrete support.
+    """
 
     name = "plain_mlp"
+    comparison_role = "primary"
+    uncertainty_scope = "deterministic_distributional"
+
+    def __init__(
+        self,
+        family: BaseFamily,
+        *,
+        hidden_dims: list[int],
+        epochs: int,
+        learning_rate: float,
+        randomized_pit: bool,
+    ) -> None:
+        self._family = family
+        self._hidden_dims = hidden_dims
+        self._epochs = epochs
+        self._learning_rate = learning_rate
+        self._randomized_pit = randomized_pit
+        self._model: _PlainMLP | None = None
+
+    def fit(self, train_data: DataModule, *, smoke: bool) -> None:
+        """Fit all raw family parameters by maximum likelihood.
+
+        Args:
+            train_data: Shared preprocessed training partition.
+            smoke: Use one epoch when true.
+        """
+        features = _feature_matrix(train_data.features)
+        target = train_data.target
+        model = _PlainMLP(
+            features.shape[-1], self._family.param_count, self._hidden_dims
+        )
+        optimizer = torch.optim.Adam(model.parameters(), lr=self._learning_rate)
+        epochs = 1 if smoke else self._epochs
+        for _ in range(epochs):
+            optimizer.zero_grad()
+            loss = -self._family.log_prob(model(features), target).mean()
+            loss.backward()
+            optimizer.step()
+        self._model = model
+
+    def _params(self, features: torch.Tensor) -> torch.Tensor:
+        """Return raw family parameters from a fitted network."""
+        if self._model is None:
+            raise RuntimeError("fit() must be called before predict().")
+        params: torch.Tensor = self._model(features)
+        return params
+
+    def predict(
+        self,
+        features: Mapping[str, torch.Tensor],
+        target: torch.Tensor,
+        *,
+        draws: int,
+        predictive_samples: int,
+        seed: int,
+    ) -> PredictiveResult:
+        """Return the fitted family predictive.
+
+        Args:
+            features: Shared held-out feature tensors.
+            target: Held-out target on model scale.
+            draws: Ignored for a point-estimated model.
+            predictive_samples: Number of response samples.
+            seed: Predictive sampling and PIT seed.
+
+        Returns:
+            Predictive samples, log-density, PIT, and raw parameter vector.
+        """
+        del draws
+        with torch.no_grad():
+            params = self._params(_feature_matrix(features))
+            distribution = self._family(params)
+            with torch.random.fork_rng():
+                torch.manual_seed(seed)
+                samples = distribution.sample((predictive_samples,))
+            return PredictiveResult(
+                samples=samples,
+                log_density=distribution.log_prob(target).to(torch.float64),
+                cdf=pit(
+                    self._family,
+                    params.unsqueeze(0),
+                    target,
+                    randomized=self._randomized_pit,
+                    seed=seed,
+                ),
+                parameter_draws=params.unsqueeze(0),
+            )
+
+
+class MeanOnlyGaussianAdapter:
+    """Supplemental mean-only MLP with a Gaussian residual.
+
+    Args:
+        hidden_dims: Hidden-layer widths.
+        epochs: Full-run training epochs.
+        learning_rate: Adam learning rate.
+    """
+
+    name = "mean_only_gaussian"
+    comparison_role = "supplemental"
     uncertainty_scope = "predictive_only"
 
     def __init__(
@@ -458,15 +589,19 @@ class PlainMLPAdapter:
         self._residual_scale = torch.tensor(1.0)
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
-        """Fit the point predictor, then estimate its Gaussian residual scale."""
+        """Fit the point predictor and its homoscedastic residual scale.
+
+        Args:
+            train_data: Shared preprocessed training partition.
+            smoke: Use one epoch when true.
+        """
         features = _feature_matrix(train_data.features)
         target = train_data.target
-        model = _PlainMLP(features.shape[-1], self._hidden_dims)
+        model = _PlainMLP(features.shape[-1], 1, self._hidden_dims)
         optimizer = torch.optim.Adam(model.parameters(), lr=self._learning_rate)
-        epochs = 1 if smoke else self._epochs
-        for _ in range(epochs):
+        for _ in range(1 if smoke else self._epochs):
             optimizer.zero_grad()
-            loss = torch.nn.functional.mse_loss(model(features), target)
+            loss = torch.nn.functional.mse_loss(model(features).squeeze(-1), target)
             loss.backward()
             optimizer.step()
         self._model = model
@@ -478,8 +613,7 @@ class PlainMLPAdapter:
         """Return model-scale means from a fitted network."""
         if self._model is None:
             raise RuntimeError("fit() must be called before predict().")
-        mean: torch.Tensor = self._model(features)
-        return mean
+        return self._model(features).squeeze(-1)
 
     def predict(
         self,
@@ -490,7 +624,18 @@ class PlainMLPAdapter:
         predictive_samples: int,
         seed: int,
     ) -> PredictiveResult:
-        """Return the fitted homoscedastic Gaussian predictive."""
+        """Return the fitted homoscedastic Gaussian predictive.
+
+        Args:
+            features: Shared held-out feature tensors.
+            target: Held-out target on model scale.
+            draws: Ignored for a point-estimated model.
+            predictive_samples: Number of response samples.
+            seed: Predictive sampling seed.
+
+        Returns:
+            Predictive samples, log-density, and Gaussian CDF.
+        """
         del draws
         with torch.no_grad():
             mean = self._mean(_feature_matrix(features))
@@ -516,6 +661,7 @@ class NampyNamlssAdapter:
     """
 
     name = "nampy_namlss"
+    comparison_role = "supplemental"
     uncertainty_scope = "deterministic_distributional"
 
     def __init__(
@@ -650,6 +796,7 @@ class LANAMAdapter:
     """
 
     name = "lanam"
+    comparison_role = "supplemental"
     uncertainty_scope = "mean_only_laplace_location"
 
     def __init__(
@@ -772,32 +919,53 @@ class LANAMAdapter:
 
 
 class DeepEnsembleAdapter:
-    """Uniform mixture of independently initialized Gaussian-residual MLPs."""
+    """Uniform mixture of independently initialized distributional MLPs.
+
+    Args:
+        family: Dataset response family and parameter links.
+        members: Number of independently initialized global MLPs.
+        hidden_dims: Hidden-layer widths per member.
+        epochs: Full-run training epochs per member.
+        learning_rate: Adam learning rate.
+        randomized_pit: Whether to randomize PIT on discrete support.
+    """
 
     name = "deep_ensemble"
-    uncertainty_scope = "predictive_only"
+    comparison_role = "primary"
+    uncertainty_scope = "ensemble_distributional"
 
     def __init__(
         self,
+        family: BaseFamily,
         *,
         members: int,
         hidden_dims: list[int],
         epochs: int,
         learning_rate: float,
+        randomized_pit: bool,
     ) -> None:
         if members < 2:
             raise ValueError("A deep ensemble requires at least two members.")
+        self._family = family
+        self._randomized_pit = randomized_pit
         self._members = [
             PlainMLPAdapter(
+                family,
                 hidden_dims=hidden_dims,
                 epochs=epochs,
                 learning_rate=learning_rate,
+                randomized_pit=randomized_pit,
             )
             for _ in range(members)
         ]
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
-        """Fit independently initialized members on the same training rows."""
+        """Fit independently initialized members on the same training rows.
+
+        Args:
+            train_data: Shared preprocessed training partition.
+            smoke: Use one epoch per member when true.
+        """
         for member in self._members:
             member.fit(train_data, smoke=smoke)
 
@@ -810,15 +978,32 @@ class DeepEnsembleAdapter:
         predictive_samples: int,
         seed: int,
     ) -> PredictiveResult:
-        """Return the equal-weight mixture predictive across ensemble members."""
-        samples_per_member = math.ceil(predictive_samples / len(self._members))
+        """Return the equal-weight mixture predictive across ensemble members.
+
+        Args:
+            features: Shared held-out feature tensors.
+            target: Held-out target on model scale.
+            draws: Ignored by point-estimated members.
+            predictive_samples: Number of mixture response samples.
+            seed: Mixture assignment, member sampling, and PIT seed.
+
+        Returns:
+            Equal-weight mixture samples, density, PIT, and member parameters.
+        """
+        generator = torch.Generator().manual_seed(seed)
+        assignments = torch.randint(
+            len(self._members), (predictive_samples,), generator=generator
+        )
+        sample_counts = torch.bincount(
+            assignments, minlength=len(self._members)
+        ).tolist()
         predictions = [
             member.predict(
                 features,
                 target,
                 draws=draws,
-                predictive_samples=samples_per_member,
-                seed=seed + index,
+                predictive_samples=max(int(sample_counts[index]), 1),
+                seed=seed + index + 1,
             )
             for index, member in enumerate(self._members)
         ]
@@ -830,10 +1015,32 @@ class DeepEnsembleAdapter:
         log_density = torch.logsumexp(member_log_density, dim=0) - math.log(
             len(self._members)
         )
+        parameter_draws = torch.cat(
+            [
+                prediction.parameter_draws
+                for prediction in predictions
+                if prediction.parameter_draws is not None
+            ]
+        )
+        if int(parameter_draws.shape[0]) != len(self._members):
+            raise RuntimeError("Ensemble member did not expose family parameters.")
         return PredictiveResult(
             samples=torch.cat(
-                [prediction.samples for prediction in predictions], dim=0
-            )[:predictive_samples],
+                [
+                    prediction.samples[: int(sample_counts[index])]
+                    for index, prediction in enumerate(predictions)
+                ],
+                dim=0,
+            ),
             log_density=log_density,
-            cdf=torch.stack([prediction.cdf for prediction in predictions]).mean(dim=0),
+            # Randomize the predictive mixture's count jump once, after member
+            # CDF averaging; per-member randomization is not a valid mixture PIT.
+            cdf=pit(
+                self._family,
+                parameter_draws,
+                target,
+                randomized=self._randomized_pit,
+                seed=seed,
+            ),
+            parameter_draws=parameter_draws,
         )
