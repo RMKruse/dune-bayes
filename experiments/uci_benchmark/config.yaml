@@ -66,6 +66,16 @@ architecture:
   hidden_dims: [16]
   prior_scale: 1.0
   activation: tanh
+tuning:
+  seed: 102
+  objective: validation_nll
+  hidden_dims:
+    - [16]
+    - [32]
+    - [64]
+    - [32, 32]
+  learning_rates: [0.001, 0.003, 0.01]
+  smoke_candidate_count: 2
 training:
   epochs: 500
   learning_rate: 0.01

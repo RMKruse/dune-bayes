@@ -1,4 +1,4 @@
-"""UCI benchmark panel boundaries (ADR-0008, GitHub #102–#103/#175–#177)."""
+"""UCI benchmark panel boundaries (ADR-0008, GitHub #102–#103/#175–#179)."""
 
 from __future__ import annotations
 
@@ -39,7 +39,11 @@ from experiments.uci_benchmark.adapters import (
     mean_mixture_nll,
     predict_on_original_scale,
 )
-from experiments.uci_benchmark.run import _build_dune_bayes_model
+from experiments.uci_benchmark.run import (
+    _build_dune_bayes_model,
+    materialize_candidate_plan,
+    select_model_candidate,
+)
 
 
 def _smoke_config(tmp_path: Path, *, seed: int = 102) -> Path:
@@ -971,6 +975,96 @@ def test_panel_config_declares_exactly_four_family_matched_models() -> None:
     assert config["training"]["validation_patience_checks"] == 5
 
 
+def test_panel_config_materializes_the_frozen_twelve_candidate_budget() -> None:
+    """The paper-facing tuning opportunity is fixed and reviewable before fitting."""
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+
+    assert config["tuning"] == {
+        "seed": 102,
+        "objective": "validation_nll",
+        "hidden_dims": [[16], [32], [64], [32, 32]],
+        "learning_rates": [0.001, 0.003, 0.01],
+        "smoke_candidate_count": 2,
+    }
+    assert config["architecture"]["activation"] == "tanh"
+    assert config["architecture"]["prior_scale"] == 1.0
+    assert config["baselines"]["deep_ensemble_members"] == 5
+    materialized, executed = materialize_candidate_plan(config, smoke=False)
+    assert len(materialized) == len(executed) == 12
+    assert {
+        (tuple(candidate["hidden_dims"]), candidate["learning_rate"])
+        for candidate in materialized
+    } == {
+        (tuple(hidden_dims), learning_rate)
+        for hidden_dims in ([16], [32], [64], [32, 32])
+        for learning_rate in (0.001, 0.003, 0.01)
+    }
+
+
+def test_candidate_selection_consumes_failures_and_uses_stable_nll_ties() -> None:
+    """Failed slots remain in the trace and equal finite scores keep grid order."""
+    data = DataModule(
+        pd.DataFrame({"x": [0.0, 1.0], "y": [0.0, 1.0]}),
+        response="y",
+        numeric_scaling={},
+    )
+    candidates = [{"candidate_id": f"candidate-{index:02d}"} for index in range(1, 5)]
+    scores = [1.0, None, 0.5, 0.5]
+    built: list[str] = []
+
+    class FakeAdapter:
+        """Minimal adapter exposing only the selection fit metadata seam."""
+
+        name = "fake"
+
+        def __init__(self, candidate_id: str, score: float | None) -> None:
+            built.append(candidate_id)
+            self.score = score
+            self.training_metadata = {
+                "status": "completed" if score is not None else "failed",
+                "failure": None if score is not None else "non_finite_validation_nll",
+                "best_validation_nll": score,
+                "validation_checks": [{"epoch": 1, "nll": score}],
+                "fit_count": 1,
+                "epochs_completed": 1,
+                "history": {"loss": [score if score is not None else float("nan")]},
+            }
+            if score is not None:
+                self.training_metadata["parameter_count"] = 3
+
+        @property
+        def parameter_count(self) -> int:
+            """Return the known fake model size."""
+            return 3
+
+        def fit(self, train_data: DataModule, *, smoke: bool) -> None:
+            del train_data, smoke
+            if self.score is None:
+                raise RuntimeError("synthetic fit failure")
+
+    winner, evidence = select_model_candidate(
+        candidates,
+        build=lambda candidate: FakeAdapter(
+            str(candidate["candidate_id"]),
+            scores[int(str(candidate["candidate_id"]).split("-")[-1]) - 1],
+        ),
+        train_data=data,
+        smoke=False,
+        tuning_seed=102,
+    )
+
+    assert winner is not None
+    assert built == ["candidate-01", "candidate-02", "candidate-03", "candidate-04"]
+    assert evidence["candidate_slots"] == 4
+    assert evidence["failures"] == 1
+    assert evidence["selected_candidate_id"] == "candidate-03"
+    assert len(evidence["trials"]) == 4
+    assert evidence["trials"][1]["parameter_count"] == 3
+    json.dumps(evidence, allow_nan=False)
+
+
 def test_smoke_persists_primary_training_and_checkpoint_metadata(
     tmp_path: Path,
 ) -> None:
@@ -1004,6 +1098,40 @@ def test_smoke_persists_primary_training_and_checkpoint_metadata(
     assert len(members) == 5
     assert all(member["restored_best_checkpoint"] is True for member in members)
     assert np.isfinite(metadata["deep_ensemble"]["candidate_selection_validation_nll"])
+
+    selection = json.loads((metric_root / "selection.json").read_text(encoding="utf-8"))
+    assert selection["evidence_role"] == "bounded_smoke_only"
+    assert selection["paper_claim_capable"] is False
+    assert selection["objective"] == "validation_nll"
+    assert selection["tuning_seed"] == 102
+    assert len(selection["materialized_candidates"]) == 12
+    assert selection["executed_candidate_count"] == 2
+    assert set(selection["procedures"]) == {"R", "C"}
+    assert selection["procedures"]["R"]["interventions"] == []
+    assert selection["procedures"]["C"]["interventions"] == [
+        "continuous_response_standardization",
+        "dune_negative_binomial_moment_initialization",
+    ]
+    assert selection["procedures"]["R"]["response_transform"]["method"] == "identity"
+    assert selection["procedures"]["C"]["response_transform"]["method"] == "standard"
+    for procedure in selection["procedures"].values():
+        assert set(procedure["models"]) == set(_PRIMARY_MODELS)
+        for model in procedure["models"].values():
+            assert len(model["trials"]) == 2
+            assert model["selected_configuration"] in [
+                trial["configuration"] for trial in model["trials"]
+            ]
+            for trial in model["trials"]:
+                assert trial["fit_count"] >= 1
+                assert trial["parameter_count"] > 0
+                assert trial["epochs"] >= 1
+                assert trial["elapsed_seconds"] >= 0.0
+                assert trial["validation_trace"]
+    for procedure in selection["procedures"].values():
+        dune_trials = procedure["models"]["dune_bayes"]["trials"]
+        assert all(
+            set(trial["history"]) == {"loss", "nll", "kl"} for trial in dune_trials
+        )
 
 
 def test_deterministic_namlss_has_zero_kl_through_the_additive_model_boundary() -> None:
@@ -1121,6 +1249,51 @@ def test_count_ensemble_randomizes_pit_after_member_mixture() -> None:
     # PIT contract after assembling the same five parameter vectors.
     torch.testing.assert_close(prediction.cdf, reference, rtol=0.0, atol=0.0)
     assert prediction.samples.shape == (7, 4)
+
+
+def test_deep_ensemble_preserves_completed_member_evidence_on_exception() -> None:
+    """An interrupted ensemble slot reports every member attempted before failure."""
+
+    class FailOnSecondMemberFamily(NormalFamily):
+        """Raise when the second member begins fitting."""
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls = 0
+
+        def log_prob(self, params: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            """Fail after one member's train and validation evaluations."""
+            self.calls += 1
+            if self.calls == 3:
+                raise RuntimeError("synthetic second-member failure")
+            return super().log_prob(params, y)
+
+    data = DataModule(
+        pd.DataFrame({"x": [-1.0, 0.0, 1.0], "y": [-1.0, 0.0, 1.0]}),
+        response="y",
+        numeric_scaling={},
+    )
+    adapter = DeepEnsembleAdapter(
+        FailOnSecondMemberFamily(),
+        members=5,
+        hidden_dims=[2],
+        epochs=500,
+        learning_rate=0.01,
+        randomized_pit=False,
+        validation_data=data,
+    )
+
+    with pytest.raises(RuntimeError, match="synthetic second-member failure"):
+        adapter.fit(data, smoke=True)
+
+    metadata = adapter.training_metadata
+    assert metadata["status"] == "failed"
+    assert metadata["fit_count"] == 2
+    assert metadata["epochs_completed"] == 1
+    assert len(metadata["members"]) == 2
+    assert metadata["members"][0]["status"] == "completed"
+    assert metadata["members"][1]["status"] == "failed"
+    assert metadata["parameter_count"] > 0
 
 
 def test_panel_config_declares_bayesnam_style_baseline() -> None:

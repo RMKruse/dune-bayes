@@ -1,4 +1,4 @@
-"""UCI benchmark runner (ADR-0008, GitHub #102–#103, #176–#178)."""
+"""UCI benchmark runner (ADR-0008, GitHub #102–#103, #176–#179)."""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ import importlib
 import json
 import shutil
 import sys
+import time
 import urllib.request
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,7 @@ from dune_bayes.metrics import (  # noqa: E402
 )
 from dune_bayes.model import BayesianNAMLSS  # noqa: E402
 from dune_bayes.shapes import BayesianMLP, DeterministicMLP  # noqa: E402
-from dune_bayes.utils import EPS  # noqa: E402
+from dune_bayes.utils import EPS, seed_everything  # noqa: E402
 from experiments.uci_benchmark.adapters import (  # noqa: E402
     BamlssFixtureAdapter,
     BayesNamStyleAdapter,
@@ -251,6 +252,7 @@ def _build_dune_bayes_model(
     *,
     location_only: bool = False,
     deterministic: bool = False,
+    moment_initialize_negative_binomial: bool = True,
 ) -> BayesianNAMLSS:
     """Build the configured Bayesian or point-estimated additive model."""
     hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
@@ -310,7 +312,9 @@ def _build_dune_bayes_model(
             family=family,
             n_obs=train_data.n_obs,
         )
-    if isinstance(family, NegativeBinomialFamily):
+    if moment_initialize_negative_binomial and isinstance(
+        family, NegativeBinomialFamily
+    ):
         target = train_data.target
         mean = target.mean()
         variance = target.var(correction=0)
@@ -326,6 +330,188 @@ def _build_dune_bayes_model(
         with torch.no_grad():
             model.intercept.loc.copy_(raw.to(model.intercept.loc))
     return model
+
+
+def materialize_candidate_plan(
+    config: Mapping[str, Any], *, smoke: bool
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Materialize and validate the frozen tuning grid before any fit starts.
+
+    Args:
+        config: Complete benchmark configuration.
+        smoke: Whether to execute only the bounded tracer subset.
+
+    Returns:
+        The complete twelve-candidate plan and the candidates to execute.
+
+    Raises:
+        ValueError: If any locked issue #179 control has drifted.
+    """
+    tuning = config["tuning"]
+    hidden_dims = [[int(width) for width in dims] for dims in tuning["hidden_dims"]]
+    learning_rates = [float(rate) for rate in tuning["learning_rates"]]
+    if hidden_dims != [[16], [32], [64], [32, 32]]:
+        raise ValueError("Issue #179 requires the frozen four-width candidate grid.")
+    if learning_rates != [0.001, 0.003, 0.01]:
+        raise ValueError("Issue #179 requires the frozen three-rate candidate grid.")
+    if str(tuning["objective"]) != "validation_nll":
+        raise ValueError("Validation NLL is the only permitted selection objective.")
+    if str(config["architecture"]["activation"]) != "tanh":
+        raise ValueError("Issue #179 fixes the candidate activation at tanh.")
+    if float(config["architecture"]["prior_scale"]) != 1.0:
+        raise ValueError("The DUNE benchmark must keep fixed prior_scale=1.0.")
+    if int(config["baselines"]["deep_ensemble_members"]) != 5:
+        raise ValueError("The frozen deep ensemble contains exactly five members.")
+
+    candidates = [
+        {
+            "candidate_id": f"candidate-{index:02d}",
+            "hidden_dims": dims,
+            "learning_rate": learning_rate,
+            "activation": "tanh",
+            "ensemble_members": 5,
+            "prior_scale": 1.0,
+        }
+        for index, (dims, learning_rate) in enumerate(
+            (
+                (dims, learning_rate)
+                for dims in hidden_dims
+                for learning_rate in learning_rates
+            ),
+            start=1,
+        )
+    ]
+    if len(candidates) != 12:
+        raise ValueError("Issue #179 requires exactly twelve materialized candidates.")
+    if not smoke:
+        return candidates, candidates
+    smoke_count = int(tuning["smoke_candidate_count"])
+    if not 1 <= smoke_count < len(candidates):
+        raise ValueError("The bounded smoke candidate count must be between 1 and 11.")
+    return candidates, candidates[:smoke_count]
+
+
+def _selection_nll(metadata: Mapping[str, object]) -> float | None:
+    """Return one adapter's sole candidate-selection objective."""
+    value = metadata.get(
+        "candidate_selection_validation_nll", metadata.get("best_validation_nll")
+    )
+    if value is None:
+        return None
+    result = float(value)
+    return result if np.isfinite(result) else None
+
+
+def _json_finite(value: Any) -> Any:
+    """Replace non-finite floats recursively so failure evidence stays valid JSON."""
+    if isinstance(value, float) and not np.isfinite(value):
+        return None
+    if isinstance(value, Mapping):
+        return {str(key): _json_finite(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_finite(item) for item in value]
+    return value
+
+
+def select_model_candidate(
+    candidates: list[dict[str, object]],
+    *,
+    build: Callable[[Mapping[str, object]], BenchmarkAdapter],
+    train_data: DataModule,
+    smoke: bool,
+    tuning_seed: int,
+) -> tuple[BenchmarkAdapter | None, dict[str, object]]:
+    """Consume every predeclared slot and retain the finite NLL winner (#179).
+
+    Args:
+        candidates: Candidate configurations materialized before fitting.
+        build: Factory for one model candidate.
+        train_data: Shared fitting partition for this procedure.
+        smoke: Whether adapters should use their bounded epoch budget.
+        tuning_seed: One fixed seed reused for every candidate.
+
+    Returns:
+        The fitted winner, if any, and its complete machine-readable trace.
+    """
+    trials: list[dict[str, object]] = []
+    fitted: list[tuple[float, str, BenchmarkAdapter]] = []
+    for candidate in candidates:
+        started = time.perf_counter()
+        adapter: BenchmarkAdapter | None = None
+        metadata: dict[str, object]
+        try:
+            seed_everything(tuning_seed, deterministic=True)
+            adapter = build(candidate)
+            adapter.fit(train_data, smoke=smoke)
+            metadata = _json_finite(dict(getattr(adapter, "training_metadata", {})))
+        except Exception as error:  # A failed fit still consumes this fixed slot.
+            metadata = _json_finite(
+                dict(getattr(adapter, "training_metadata", {})) if adapter else {}
+            )
+            metadata.update(
+                {
+                    "status": "failed",
+                    "failure": f"{type(error).__name__}: {error}",
+                }
+            )
+            metadata.setdefault("epochs_completed", 0)
+            metadata.setdefault("fit_count", 1)
+            metadata.setdefault(
+                "history",
+                {"loss": [], "nll": [], "kl": []}
+                if getattr(adapter, "name", None) == "dune_bayes"
+                else {},
+            )
+            metadata.setdefault(
+                "parameter_count", int(getattr(adapter, "parameter_count", 0))
+            )
+            metadata.setdefault("validation_checks", [])
+        validation_nll = _selection_nll(metadata)
+        status = str(metadata.get("status", "failed"))
+        if status == "completed" and validation_nll is not None and adapter is not None:
+            fitted.append((validation_nll, str(candidate["candidate_id"]), adapter))
+        else:
+            status = "failed"
+        trials.append(
+            {
+                "candidate_id": candidate["candidate_id"],
+                "configuration": candidate,
+                "status": status,
+                "failure": metadata.get("failure"),
+                "validation_nll": validation_nll,
+                "validation_trace": metadata.get("validation_checks", []),
+                "parameter_count": int(metadata.get("parameter_count", 0)),
+                "fit_count": int(metadata.get("fit_count", 1)),
+                "epochs": int(metadata.get("epochs_completed", 0)),
+                "elapsed_seconds": time.perf_counter() - started,
+                "history": metadata.get("history", {}),
+                "training_metadata": metadata,
+            }
+        )
+
+    winner = min(fitted, key=lambda item: (item[0], item[1])) if fitted else None
+    selected_id = winner[1] if winner else None
+    selected = next(
+        (
+            trial["configuration"]
+            for trial in trials
+            if trial["candidate_id"] == selected_id
+        ),
+        None,
+    )
+    return (
+        winner[2] if winner else None,
+        {
+            "candidate_slots": len(candidates),
+            "fit_count": sum(int(trial["fit_count"]) for trial in trials),
+            "failures": sum(trial["status"] == "failed" for trial in trials),
+            "elapsed_seconds": sum(float(trial["elapsed_seconds"]) for trial in trials),
+            "selected_candidate_id": selected_id,
+            "selected_configuration": selected,
+            "selected_validation_nll": winner[0] if winner else None,
+            "trials": trials,
+        },
+    )
 
 
 def _score_dataset(
@@ -347,14 +533,12 @@ def _score_dataset(
 
     response = str(dataset["response"])
     preprocessing = DataModule(outer_train, response=response, numeric_scaling={})
-    train_data = _data_subset(preprocessing, fit, response=response)
-    validation_data = _data_subset(preprocessing, validation, response=response)
+    raw_train_data = _data_subset(preprocessing, fit, response=response)
+    raw_validation_data = _data_subset(preprocessing, validation, response=response)
     test_features = preprocessing.transform(test)
     test_target = torch.tensor(test[response].to_numpy(), dtype=torch.float32)
     family_name = str(dataset["family"])
     response_transform = ResponseTransform.fit(preprocessing.target, family=family_name)
-    train_data.target = response_transform.to_model_scale(train_data.target)
-    validation_data.target = response_transform.to_model_scale(validation_data.target)
     transform_path = paths.metrics / name / "response_transform.json"
     transform_path.parent.mkdir(parents=True, exist_ok=True)
     transform_path.write_text(
@@ -378,8 +562,6 @@ def _score_dataset(
         family = BetaFamily()
     else:
         family = NormalFamily()
-    hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
-    model = _build_dune_bayes_model(train_data, family, config)
     draws_count = min(int(config["draws"]), 16) if smoke else int(config["draws"])
     predictive_samples = (
         min(int(config["predictive_samples"]), 32)
@@ -391,14 +573,191 @@ def _score_dataset(
     check_every = int(training["validation_check_every"])
     patience_checks = int(training["validation_patience_checks"])
     validation_draws = int(training["validation_draws"])
+    tuning_seed = int(config["tuning"]["seed"])
+    materialized_candidates, executed_candidates = materialize_candidate_plan(
+        config, smoke=smoke
+    )
+
+    def procedure_data(
+        transform: ResponseTransform,
+    ) -> tuple[DataModule, DataModule]:
+        """Apply one locked procedure without refitting shared preprocessing."""
+        train_data = copy.copy(raw_train_data)
+        validation_data = copy.copy(raw_validation_data)
+        train_data.target = transform.to_model_scale(raw_train_data.target)
+        validation_data.target = transform.to_model_scale(raw_validation_data.target)
+        return train_data, validation_data
+
+    def build_primary_adapter(
+        model_name: str,
+        candidate: Mapping[str, object],
+        train_data: DataModule,
+        validation_data: DataModule,
+        *,
+        procedure: str,
+    ) -> BenchmarkAdapter:
+        """Build one primary model from one predeclared candidate slot."""
+        candidate_config = copy.deepcopy(config)
+        candidate_config["architecture"]["hidden_dims"] = candidate["hidden_dims"]
+        candidate_config["training"]["learning_rate"] = candidate["learning_rate"]
+        learning_rate = float(candidate["learning_rate"])
+        hidden_dims = [int(width) for width in candidate["hidden_dims"]]
+        if model_name == "plain_mlp":
+            return PlainMLPAdapter(
+                family,
+                hidden_dims=hidden_dims,
+                epochs=int(training["epochs"]),
+                learning_rate=learning_rate,
+                randomized_pit=family_name == "negative_binomial",
+                validation_data=validation_data,
+                check_every=check_every,
+                patience_checks=patience_checks,
+            )
+        if model_name == "deep_ensemble":
+            return DeepEnsembleAdapter(
+                family,
+                members=int(candidate["ensemble_members"]),
+                hidden_dims=hidden_dims,
+                epochs=int(training["epochs"]),
+                learning_rate=learning_rate,
+                randomized_pit=family_name == "negative_binomial",
+                validation_data=validation_data,
+                check_every=check_every,
+                patience_checks=patience_checks,
+            )
+        deterministic = model_name == "deterministic_namlss"
+        model = _build_dune_bayes_model(
+            train_data,
+            family,
+            candidate_config,
+            deterministic=deterministic,
+            moment_initialize_negative_binomial=(
+                procedure == "C" and model_name == "dune_bayes"
+            ),
+        )
+        adapter_type = DeterministicNamlssAdapter if deterministic else DuneBayesAdapter
+        return adapter_type(
+            model,
+            family,
+            epochs=int(training["epochs"]),
+            learning_rate=learning_rate,
+            warmup_epochs=0 if deterministic else int(training["warmup_epochs"]),
+            randomized_pit=family_name == "negative_binomial",
+            validation_data=validation_data,
+            check_every=check_every,
+            patience_checks=patience_checks,
+            validation_draws=(
+                1
+                if deterministic
+                else min(validation_draws, 16)
+                if smoke
+                else validation_draws
+            ),
+            validation_seed=tuning_seed,
+        )
+
+    primary_models = (
+        "dune_bayes",
+        "deterministic_namlss",
+        "plain_mlp",
+        "deep_ensemble",
+    )
+    reference_transform = ResponseTransform(method="identity", loc=0.0, scale=1.0)
+    procedures = {
+        "R": (reference_transform, []),
+        "C": (
+            response_transform,
+            [
+                "continuous_response_standardization",
+                "dune_negative_binomial_moment_initialization",
+            ],
+        ),
+    }
+    selection: dict[str, object] = {
+        "dataset": name,
+        "evidence_role": "bounded_smoke_only" if smoke else "selection_only",
+        "paper_claim_capable": False,
+        "objective": "validation_nll",
+        "tuning_seed": tuning_seed,
+        "materialized_candidates": materialized_candidates,
+        "executed_candidate_count": len(executed_candidates),
+        "procedures": {},
+    }
+    selected_adapters: dict[str, BenchmarkAdapter] = {}
+    candidate_train_data: DataModule | None = None
+    candidate_validation_data: DataModule | None = None
+    for procedure, (transform, interventions) in procedures.items():
+        train_data, validation_data = procedure_data(transform)
+        models: dict[str, object] = {}
+        for model_name in primary_models:
+
+            def build(
+                candidate: Mapping[str, object],
+                model_name: str = model_name,
+                train_data: DataModule = train_data,
+                validation_data: DataModule = validation_data,
+                procedure: str = procedure,
+            ) -> BenchmarkAdapter:
+                """Bind this procedure/model pair for the generic slot runner."""
+                return build_primary_adapter(
+                    model_name,
+                    candidate,
+                    train_data,
+                    validation_data,
+                    procedure=procedure,
+                )
+
+            adapter, evidence = select_model_candidate(
+                executed_candidates,
+                build=build,
+                train_data=train_data,
+                smoke=smoke,
+                tuning_seed=tuning_seed,
+            )
+            models[model_name] = evidence
+            if procedure == "C" and adapter is not None:
+                selected_adapters[model_name] = adapter
+        selection["procedures"][procedure] = {
+            "interventions": interventions,
+            "response_transform": {
+                "fit_partition": "train",
+                "loc": transform.loc,
+                "method": transform.method,
+                "n_fit": preprocessing.n_obs,
+                "scale": transform.scale,
+            },
+            "models": models,
+        }
+        if procedure == "C":
+            candidate_train_data = train_data
+            candidate_validation_data = validation_data
+
+    selection_path = paths.metrics / name / "selection.json"
+    selection_path.write_text(
+        json.dumps(selection, allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    missing = set(primary_models) - set(selected_adapters)
+    if missing:
+        raise RuntimeError(
+            f"No finite candidate winner for {name}: {', '.join(sorted(missing))}."
+        )
+    if candidate_train_data is None or candidate_validation_data is None:
+        raise RuntimeError("Candidate procedure did not materialize training data.")
+    train_data = candidate_train_data
+    validation_data = candidate_validation_data
+    hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
 
     def score(
         adapter: BenchmarkAdapter,
         scored_family: str,
         metric_dir: Path | None = None,
+        *,
+        already_fitted: bool = False,
     ) -> PredictiveResult | None:
         """Fit and score one adapter through the shared contract."""
-        adapter.fit(train_data, smoke=smoke)
+        if not already_fitted:
+            adapter.fit(train_data, smoke=smoke)
         training_metadata = getattr(adapter, "training_metadata", None)
         if training_metadata:
             destination = metric_dir or paths.metrics / name / adapter.name
@@ -437,50 +796,25 @@ def _score_dataset(
         )
         return result
 
-    adapter: BenchmarkAdapter = DuneBayesAdapter(
-        model,
-        family,
-        epochs=int(config["training"]["epochs"]),
-        learning_rate=float(config["training"]["learning_rate"]),
-        warmup_epochs=int(config["training"]["warmup_epochs"]),
-        randomized_pit=family_name == "negative_binomial",
-        validation_data=validation_data,
-        check_every=check_every,
-        patience_checks=patience_checks,
-        validation_draws=min(validation_draws, 16) if smoke else validation_draws,
-        validation_seed=int(config["seed"]),
-    )
-    prediction = score(adapter, family_name, paths.metrics / name)
+    adapter = selected_adapters["dune_bayes"]
+    if not isinstance(adapter, DuneBayesAdapter):
+        raise TypeError("The selected DUNE adapter lost its model contract.")
+    prediction = score(adapter, family_name, paths.metrics / name, already_fitted=True)
     if prediction is not None:
         _write_dune_bayes_uncertainty(
             prediction,
-            model=model,
+            model=adapter.model,
             dataset=name,
             family=family_name,
             metric_dir=paths.metrics / name,
             response_transform=response_transform,
         )
 
-    deterministic_model = _build_dune_bayes_model(
-        train_data,
-        family,
-        config,
-        deterministic=True,
+    score(
+        selected_adapters["deterministic_namlss"],
+        family_name,
+        already_fitted=True,
     )
-    deterministic: BenchmarkAdapter = DeterministicNamlssAdapter(
-        deterministic_model,
-        family,
-        epochs=int(config["training"]["epochs"]),
-        learning_rate=float(config["training"]["learning_rate"]),
-        warmup_epochs=0,
-        randomized_pit=family_name == "negative_binomial",
-        validation_data=validation_data,
-        check_every=check_every,
-        patience_checks=patience_checks,
-        validation_draws=1,
-        validation_seed=int(config["seed"]),
-    )
-    score(deterministic, family_name)
     bayesnam_config = config.get("baselines", {}).get("bayesnam_style", {})
     if bool(bayesnam_config.get("enabled", False)):
         if str(bayesnam_config["label"]) != BayesNamStyleAdapter.name:
@@ -551,29 +885,8 @@ def _score_dataset(
             n_fit=preprocessing.n_obs,
         )
         score(bamlss, family_name)
-    plain: BenchmarkAdapter = PlainMLPAdapter(
-        family,
-        hidden_dims=hidden_dims,
-        epochs=int(config["training"]["epochs"]),
-        learning_rate=float(config["training"]["learning_rate"]),
-        randomized_pit=family_name == "negative_binomial",
-        validation_data=validation_data,
-        check_every=check_every,
-        patience_checks=patience_checks,
-    )
-    score(plain, family_name)
-    ensemble: BenchmarkAdapter = DeepEnsembleAdapter(
-        family,
-        members=int(config["baselines"]["deep_ensemble_members"]),
-        hidden_dims=hidden_dims,
-        epochs=int(config["training"]["epochs"]),
-        learning_rate=float(config["training"]["learning_rate"]),
-        randomized_pit=family_name == "negative_binomial",
-        validation_data=validation_data,
-        check_every=check_every,
-        patience_checks=patience_checks,
-    )
-    score(ensemble, family_name)
+    score(selected_adapters["plain_mlp"], family_name, already_fitted=True)
+    score(selected_adapters["deep_ensemble"], family_name, already_fitted=True)
     mean_only_config = config["baselines"].get("mean_only_gaussian", {})
     if family_name == "normal" and bool(mean_only_config.get("enabled", False)):
         mean_only: BenchmarkAdapter = MeanOnlyGaussianAdapter(

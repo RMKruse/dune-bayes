@@ -20,6 +20,29 @@ indices are created once under `data/splits/` and then reused byte-for-byte.
 Both directories are ignored because later baseline experiments consume the
 same local artifacts rather than committing upstream datasets.
 
+## Frozen candidate selection
+
+Before fitting, the runner materializes the issue #179 grid of hidden dimensions
+`[16]`, `[32]`, `[64]`, and `[32, 32]` crossed with learning rates `0.001`,
+`0.003`, and `0.01`. Each primary model receives those same 12 slots for each
+dataset and procedure under tuning seed `102`; validation NLL is the only
+selection objective. Activation remains `tanh`, the deep ensemble retains five
+members, and DUNE retains fixed `prior_scale=1.0`. Failed and non-finite fits stay
+in the trace and are never replaced.
+
+`metrics/<dataset>/selection.json` records every trial, failure, validation
+trace, selected configuration, parameter and fit counts, epochs, elapsed time,
+response-transform metadata, and training history. Procedure `R` is the
+pre-intervention reference. Procedure `C` adds only shared continuous-response
+standardization and DUNE NegativeBinomial moment initialization. The selected
+`C` fit is reused for held-out scoring, so selection does not add an undeclared
+thirteenth fit.
+
+`--smoke` executes only the first two materialized candidates for both
+procedures. Its artifact is labeled `bounded_smoke_only` and
+`paper_claim_capable: false`; it verifies orchestration but cannot support the
+full benchmark or any paper claim.
+
 Each dataset writes `metrics/<dataset>/nll.csv`, `crps.csv`, and
 `calibration.csv`. NLL is the held-out posterior-predictive negative
 log-likelihood (`logsumexp` over coherent draws), CRPS is the package's fair

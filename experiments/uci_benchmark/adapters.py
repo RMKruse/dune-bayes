@@ -1,4 +1,4 @@
-"""Common benchmark adapters (ADR-0008, GitHub #103/#175/#177/#178).
+"""Common benchmark adapters (ADR-0008, GitHub #103/#175/#177–#179).
 
 The four primary adapters share family links and scoring; supplemental
 mean-only comparators remain labeled separately.
@@ -361,6 +361,24 @@ class DuneBayesAdapter:
         self._validation_seed = validation_seed
         self.training_metadata: dict[str, object] = {}
 
+    @property
+    def model(self) -> BayesianNAMLSS:
+        """Return the fitted additive model for DUNE-only uncertainty artifacts.
+
+        Returns:
+            The additive model owned by this adapter.
+        """
+        return self._model
+
+    @property
+    def parameter_count(self) -> int:
+        """Return the number of fitted scalar model parameters.
+
+        Returns:
+            Total scalar parameter count.
+        """
+        return sum(parameter.numel() for parameter in self._model.parameters())
+
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fit dune-bayes with the configured full or smoke budget."""
         epochs = 1 if smoke else self._epochs
@@ -413,6 +431,8 @@ class DuneBayesAdapter:
             history=history,
         )
         self.training_metadata["restored_best_checkpoint"] = restored
+        self.training_metadata["parameter_count"] = self.parameter_count
+        self.training_metadata["fit_count"] = 1
 
     def predict(
         self,
@@ -664,6 +684,17 @@ class PlainMLPAdapter:
         self._model: _PlainMLP | None = None
         self.training_metadata: dict[str, object] = {}
 
+    @property
+    def parameter_count(self) -> int:
+        """Return the fitted network's scalar parameter count.
+
+        Returns:
+            Total scalar parameter count, or zero before model construction.
+        """
+        if self._model is None:
+            return 0
+        return sum(parameter.numel() for parameter in self._model.parameters())
+
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fit all raw family parameters by maximum likelihood.
 
@@ -677,6 +708,7 @@ class PlainMLPAdapter:
         model = _PlainMLP(
             features.shape[-1], self._family.param_count, self._hidden_dims
         )
+        self._model = model
         optimizer = torch.optim.Adam(model.parameters(), lr=self._learning_rate)
         epochs = 1 if smoke else self._epochs
         tracker = _ValidationCheckpoint(self._patience_checks)
@@ -703,7 +735,6 @@ class PlainMLPAdapter:
                 if tracker.observe(epoch, validation_nll, model):
                     break
         restored = tracker.restore(model)
-        self._model = model
         self.training_metadata = tracker.metadata(
             epochs_ceiling=self._epochs,
             epochs_completed=len(history["loss"]),
@@ -715,6 +746,8 @@ class PlainMLPAdapter:
             history=history,
         )
         self.training_metadata["restored_best_checkpoint"] = restored
+        self.training_metadata["parameter_count"] = self.parameter_count
+        self.training_metadata["fit_count"] = 1
 
     def _params(self, features: torch.Tensor) -> torch.Tensor:
         """Return raw family parameters from a fitted network."""
@@ -1176,6 +1209,52 @@ class DeepEnsembleAdapter:
         ]
         self.training_metadata: dict[str, object] = {}
 
+    @property
+    def parameter_count(self) -> int:
+        """Return the combined scalar parameter count across members.
+
+        Returns:
+            Total scalar parameter count for members constructed so far.
+        """
+        return sum(member.parameter_count for member in self._members)
+
+    def _training_summary(
+        self,
+        members: list[dict[str, object]],
+        *,
+        selection_nll: float | None,
+        failure: str | None,
+    ) -> dict[str, object]:
+        """Assemble complete evidence from every member attempted so far."""
+        epochs_completed = max(
+            (cast(int, item.get("epochs_completed", 0)) for item in members),
+            default=0,
+        )
+        return {
+            "status": "failed" if failure else "completed",
+            "failure": failure,
+            "epochs_ceiling": self._epochs,
+            "epochs_completed": epochs_completed,
+            "stopped_early": any(
+                bool(item.get("stopped_early", False)) for item in members
+            ),
+            "check_every": self._check_every,
+            "patience_checks": self._patience_checks,
+            "monitor_start_epoch": 0,
+            "validation_seed": None,
+            "validation_draws": 1,
+            "candidate_selection_validation_nll": selection_nll,
+            "validation_checks": [{"epoch": epochs_completed, "nll": selection_nll}],
+            "restored_best_checkpoint": bool(members)
+            and all(
+                bool(item.get("restored_best_checkpoint", False)) for item in members
+            ),
+            "parameter_count": self.parameter_count,
+            "fit_count": sum(cast(int, item.get("fit_count", 1)) for item in members),
+            "history": {},
+            "members": members,
+        }
+
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fit independently initialized members on the same training rows.
 
@@ -1183,10 +1262,31 @@ class DeepEnsembleAdapter:
             train_data: Shared preprocessed training partition.
             smoke: Use one epoch per member when true.
         """
+        members: list[dict[str, object]] = []
         for member in self._members:
-            member.fit(train_data, smoke=smoke)
+            try:
+                member.fit(train_data, smoke=smoke)
+            except Exception as error:
+                member_metadata = dict(member.training_metadata)
+                member_metadata.update(
+                    {
+                        "status": "failed",
+                        "failure": f"{type(error).__name__}: {error}",
+                    }
+                )
+                member_metadata.setdefault("epochs_completed", 0)
+                member_metadata.setdefault("fit_count", 1)
+                member_metadata.setdefault("history", {})
+                member_metadata.setdefault("parameter_count", member.parameter_count)
+                members.append(member_metadata)
+                self.training_metadata = self._training_summary(
+                    members,
+                    selection_nll=None,
+                    failure=str(member_metadata["failure"]),
+                )
+                raise
+            members.append(member.training_metadata)
         validation_data = self._validation_data or train_data
-        members = [member.training_metadata for member in self._members]
         failed = any(item["status"] == "failed" for item in members)
         selection_nll: float | None = None
         if not failed:
@@ -1206,26 +1306,11 @@ class DeepEnsembleAdapter:
             failed = not math.isfinite(selection_nll)
             if failed:
                 selection_nll = None
-        self.training_metadata = {
-            "status": "failed" if failed else "completed",
-            "failure": "non_finite_validation_nll" if failed else None,
-            "epochs_ceiling": self._epochs,
-            "epochs_completed": max(
-                cast(int, item["epochs_completed"]) for item in members
-            ),
-            "stopped_early": any(bool(item["stopped_early"]) for item in members),
-            "check_every": self._check_every,
-            "patience_checks": self._patience_checks,
-            "monitor_start_epoch": 0,
-            "validation_seed": None,
-            "validation_draws": 1,
-            "candidate_selection_validation_nll": selection_nll,
-            "restored_best_checkpoint": all(
-                bool(item["restored_best_checkpoint"]) for item in members
-            ),
-            "history": {},
-            "members": members,
-        }
+        self.training_metadata = self._training_summary(
+            members,
+            selection_nll=selection_nll,
+            failure="non_finite_validation_nll" if failed else None,
+        )
 
     def predict(
         self,
