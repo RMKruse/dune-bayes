@@ -1,10 +1,11 @@
-"""UCI benchmark panel runner and baseline scoring (ADR-0008, GitHub #102–#103)."""
+"""UCI benchmark runner and response-scale scoring (ADR-0008, GitHub #102–#175)."""
 
 from __future__ import annotations
 
 import argparse
 import csv
 import importlib
+import json
 import shutil
 import sys
 import urllib.request
@@ -47,6 +48,8 @@ from experiments.uci_benchmark.adapters import (  # noqa: E402
     NampyNamlssAdapter,
     PlainMLPAdapter,
     PredictiveResult,
+    ResponseTransform,
+    predict_on_original_scale,
 )
 
 _EXPERIMENT_DIR = Path(__file__).resolve().parent
@@ -275,6 +278,25 @@ def _score_dataset(
     test_features = train_data.transform(test)
     test_target = torch.tensor(test[response].to_numpy(), dtype=torch.float32)
     family_name = str(dataset["family"])
+    response_transform = ResponseTransform.fit(train_data.target, family=family_name)
+    train_data.target = response_transform.to_model_scale(train_data.target)
+    transform_path = paths.metrics / name / "response_transform.json"
+    transform_path.parent.mkdir(parents=True, exist_ok=True)
+    transform_path.write_text(
+        json.dumps(
+            {
+                "fit_partition": "train",
+                "loc": response_transform.loc,
+                "method": response_transform.method,
+                "n_fit": train_data.n_obs,
+                "scale": response_transform.scale,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     if family_name == "negative_binomial":
         family = NegativeBinomialFamily()
     elif family_name == "beta":
@@ -298,7 +320,9 @@ def _score_dataset(
         randomized_pit=family_name == "negative_binomial",
     )
     adapter.fit(train_data, smoke=smoke)
-    prediction = adapter.predict(
+    prediction = predict_on_original_scale(
+        adapter,
+        response_transform,
         test_features,
         test_target,
         draws=draws_count,
@@ -320,6 +344,7 @@ def _score_dataset(
         dataset=name,
         family=family_name,
         metric_dir=paths.metrics / name,
+        response_transform=response_transform,
     )
     bayesnam_config = config.get("baselines", {}).get("bayesnam_style", {})
     if bool(bayesnam_config.get("enabled", False)):
@@ -345,7 +370,9 @@ def _score_dataset(
             randomized_pit=False,
         )
         bayesnam.fit(train_data, smoke=smoke)
-        bayesnam_prediction = bayesnam.predict(
+        bayesnam_prediction = predict_on_original_scale(
+            bayesnam,
+            response_transform,
             test_features,
             test_target,
             draws=draws_count,
@@ -369,6 +396,7 @@ def _score_dataset(
             dataset=name,
             family=family_name,
             figure_dir=paths.figures / name,
+            response_transform=response_transform,
         )
     namlss_config = config.get("baselines", {}).get("namlss", {})
     if bool(namlss_config.get("enabled", False)):
@@ -382,7 +410,9 @@ def _score_dataset(
             batch_size=int(namlss_config.get("batch_size", 512)),
         )
         namlss.fit(train_data, smoke=smoke)
-        namlss_prediction = namlss.predict(
+        namlss_prediction = predict_on_original_scale(
+            namlss,
+            response_transform,
             test_features,
             test_target,
             draws=draws_count,
@@ -411,7 +441,9 @@ def _score_dataset(
             batch_size=int(lanam_config.get("batch_size", 512)),
         )
         lanam.fit(train_data, smoke=smoke)
-        lanam_prediction = lanam.predict(
+        lanam_prediction = predict_on_original_scale(
+            lanam,
+            response_transform,
             test_features,
             test_target,
             draws=draws_count,
@@ -434,9 +466,13 @@ def _score_dataset(
         bamlss: BenchmarkAdapter = BamlssFixtureAdapter(
             dataset=name,
             fixture_dir=_experiment_path(str(bamlss_config["fixture_dir"])),
+            response_transform=response_transform,
+            n_fit=train_data.n_obs,
         )
         bamlss.fit(train_data, smoke=smoke)
-        bamlss_prediction = bamlss.predict(
+        bamlss_prediction = predict_on_original_scale(
+            bamlss,
+            response_transform,
             test_features,
             test_target,
             draws=draws_count,
@@ -460,7 +496,9 @@ def _score_dataset(
         learning_rate=float(config["training"]["learning_rate"]),
     )
     plain.fit(train_data, smoke=smoke)
-    plain_prediction = plain.predict(
+    plain_prediction = predict_on_original_scale(
+        plain,
+        response_transform,
         test_features,
         test_target,
         draws=draws_count,
@@ -485,7 +523,9 @@ def _score_dataset(
         learning_rate=float(config["training"]["learning_rate"]),
     )
     ensemble.fit(train_data, smoke=smoke)
-    ensemble_prediction = ensemble.predict(
+    ensemble_prediction = predict_on_original_scale(
+        ensemble,
+        response_transform,
         test_features,
         test_target,
         draws=draws_count,
@@ -507,7 +547,9 @@ def _score_dataset(
 
 
 def _linked_parameter_draws(
-    raw_draws: torch.Tensor, family: str
+    raw_draws: torch.Tensor,
+    family: str,
+    response_transform: ResponseTransform,
 ) -> dict[str, torch.Tensor]:
     """Convert raw network outputs to family-scale parameter draws."""
     if family == "negative_binomial":
@@ -521,9 +563,12 @@ def _linked_parameter_draws(
             "precision": F.softplus(raw_draws[..., 1]) + EPS,
         }
     if family == "normal":
+        loc, scale = response_transform.to_original_normal_parameters(
+            raw_draws[..., 0], F.softplus(raw_draws[..., 1]) + EPS
+        )
         return {
-            "loc": raw_draws[..., 0],
-            "scale": F.softplus(raw_draws[..., 1]) + EPS,
+            "loc": loc,
+            "scale": scale,
         }
     return {
         f"parameter_{index}": raw_draws[..., index]
@@ -538,14 +583,17 @@ def _write_dune_bayes_uncertainty(
     dataset: str,
     family: str,
     metric_dir: Path,
+    response_transform: ResponseTransform,
 ) -> None:
     """Write the Bayesian-only parameter bands and variance decomposition."""
     raw_draws = prediction.parameter_draws
     if raw_draws is None:
         raise RuntimeError("dune-bayes prediction did not expose parameter draws.")
 
+    linked_draws = _linked_parameter_draws(raw_draws, family, response_transform)
+
     band_rows: list[dict[str, object]] = []
-    for parameter, draws in _linked_parameter_draws(raw_draws, family).items():
+    for parameter, draws in linked_draws.items():
         quantiles = torch.quantile(
             draws.to(torch.float64),
             torch.tensor([0.05, 0.5, 0.95], dtype=torch.float64),
@@ -573,9 +621,19 @@ def _write_dune_bayes_uncertainty(
                 "dataset": dataset,
                 "model": "dune_bayes",
                 "observation": observation,
-                "aleatoric": float(split.aleatoric[observation]),
-                "epistemic": float(split.epistemic[observation]),
-                "total": float(split.total[observation]),
+                "aleatoric": float(
+                    response_transform.to_original_variance(
+                        split.aleatoric[observation]
+                    )
+                ),
+                "epistemic": float(
+                    response_transform.to_original_variance(
+                        split.epistemic[observation]
+                    )
+                ),
+                "total": float(
+                    response_transform.to_original_variance(split.total[observation])
+                ),
             }
             for observation in range(int(split.total.shape[0]))
         ],
@@ -589,6 +647,7 @@ def _write_bayesnam_band_contrast(
     dataset: str,
     family: str,
     figure_dir: Path,
+    response_transform: ResponseTransform,
 ) -> None:
     """Draw the mean-only BayesNAM contrast against distributional dune-bayes."""
     if dune_prediction.parameter_draws is None:
@@ -607,9 +666,11 @@ def _write_bayesnam_band_contrast(
         arrays = [item.detach().cpu().numpy() for item in quantiles]
         return arrays[0], arrays[1], arrays[2]
 
-    dune_params = _linked_parameter_draws(dune_prediction.parameter_draws, family)
+    dune_params = _linked_parameter_draws(
+        dune_prediction.parameter_draws, family, response_transform
+    )
     bayesnam_params = _linked_parameter_draws(
-        bayesnam_prediction.parameter_draws, "normal"
+        bayesnam_prediction.parameter_draws, "normal", response_transform
     )
     dune_items = list(dune_params.items())
     x = np.arange(int(dune_prediction.parameter_draws.shape[1]))

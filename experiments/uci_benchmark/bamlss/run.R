@@ -1,5 +1,5 @@
-# BAMLSS fixture generator for dune-bayes issue #107.
-# Script version: issue-0107-bamlss-reference-v1
+# BAMLSS fixture generator for dune-bayes issues #107 and #175.
+# Script version: issue-0175-response-standardization-v1
 # R version pinned for fixture generation: R 4.4.x
 # bamlss package version pinned for fixture generation: bamlss 1.2-5
 # Required package versions: yaml 2.3.10, jsonlite 2.0.0, reticulate 1.39.0
@@ -13,7 +13,8 @@ suppressPackageStartupMessages({
   library(yaml)
 })
 
-SCRIPT_VERSION <- "issue-0107-bamlss-reference-v1"
+SCRIPT_VERSION <- "issue-0175-response-standardization-v1"
+EPS <- 1e-6
 
 usage <- function() {
   cat(
@@ -169,6 +170,13 @@ main <- function(argv = commandArgs(trailingOnly = TRUE)) {
   train <- frame[train_indices, , drop = FALSE]
   test <- frame[test_indices, , drop = FALSE]
 
+  response_loc <- mean(train[[response]])
+  response_scale <- max(
+    sqrt(mean((train[[response]] - response_loc)^2)),
+    EPS
+  )
+  train[[response]] <- (train[[response]] - response_loc) / response_scale
+
   feature_names <- setdiff(names(train), response)
   mean_terms <- vapply(feature_names, mean_term, character(1), train = train)
   formula_mu <- as.formula(paste(response, "~", paste(mean_terms, collapse = " + ")))
@@ -186,6 +194,8 @@ main <- function(argv = commandArgs(trailingOnly = TRUE)) {
   n_obs <- nrow(test)
   mu <- as_draw_matrix(parameters$mu, n_obs, "mu")
   sigma <- as_draw_matrix(parameters$sigma, n_obs, "sigma")
+  mu <- mu * response_scale + response_loc
+  sigma <- sigma * response_scale
   draw_count <- nrow(mu)
   if (draw_count < 1L) {
     stop("BAMLSS returned no posterior parameter draws.", call. = FALSE)
@@ -235,6 +245,13 @@ main <- function(argv = commandArgs(trailingOnly = TRUE)) {
       n_train = nrow(train),
       n_test = nrow(test),
       predictive_samples = args$predictive_samples,
+      response_transform = list(
+        method = "standard",
+        fit_partition = "train",
+        n_fit = nrow(train),
+        loc = response_loc,
+        scale = response_scale
+      ),
       r_version = R.version.string,
       package_versions = list(
         bamlss = as.character(utils::packageVersion("bamlss")),
@@ -246,6 +263,8 @@ main <- function(argv = commandArgs(trailingOnly = TRUE)) {
     ),
     file.path(dataset_dir, "provenance.json"),
     auto_unbox = TRUE,
+    # Preserve enough digits for the Python boundary's float32 EPS check.
+    digits = 17,
     pretty = TRUE
   )
 }
