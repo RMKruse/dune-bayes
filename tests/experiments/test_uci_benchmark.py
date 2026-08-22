@@ -14,17 +14,21 @@ import tomllib
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 import torch
+import torch.nn.functional as F
 import yaml
 
-from dune_bayes.metrics import crps
-from dune_bayes.utils import EPS
-from experiments.uci_benchmark.adapters import (
-    PredictiveResult,
-    ResponseTransform,
-    predict_on_original_scale,
+from dune_bayes.data import DataModule
+from dune_bayes.families import (
+    BaseFamily,
+    BetaFamily,
+    NegativeBinomialFamily,
+    NormalFamily,
 )
+from dune_bayes.utils import EPS
+from experiments.uci_benchmark.run import _build_dune_bayes_model
 
 
 def _smoke_config(tmp_path: Path, *, seed: int = 102) -> Path:
@@ -830,6 +834,87 @@ def test_count_dataset_runs_with_negative_binomial(tmp_path: Path) -> None:
         (metric_path.parent / "response_transform.json").read_text(encoding="utf-8")
     )
     assert metadata["method"] == "identity"
+
+
+def test_negative_binomial_candidate_intercepts_match_training_moments() -> None:
+    """The selected count candidate starts at the NBI method-of-moments values."""
+    train_data = DataModule(
+        pd.DataFrame({"x": range(6), "target": [0, 0, 0, 6, 6, 6]}),
+        response="target",
+        numeric_scaling={},
+    )
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+
+    model = _build_dune_bayes_model(
+        train_data, NegativeBinomialFamily(validate_args=True), config
+    )
+    linked = F.softplus(model.intercept.loc.detach()) + EPS
+
+    # Population moments are independently hand-computable here: mean=3,
+    # variance=9, so NBI dispersion=(9-3)/3**2=2/3. The tolerance covers only
+    # the float32 inverse-softplus/link round trip; there is no MC noise.
+    torch.testing.assert_close(
+        linked,
+        torch.tensor([3.0, 2.0 / 3.0]),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        ([1, 1, 1, 1], [1.0, 2.0 * EPS]),
+        ([0, 0, 0, 0], [2.0 * EPS, 2.0 * EPS]),
+    ],
+)
+def test_negative_binomial_candidate_uses_finite_poisson_limit_fallback(
+    target: list[int], expected: list[float]
+) -> None:
+    """Non-positive moment estimates use the smallest finite linked values."""
+    train_data = DataModule(
+        pd.DataFrame({"x": range(4), "target": target}),
+        response="target",
+        numeric_scaling={},
+    )
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+    family = NegativeBinomialFamily(validate_args=True)
+
+    model = _build_dune_bayes_model(train_data, family, config)
+    linked = F.softplus(model.intercept.loc.detach()) + EPS
+    log_prob = family(model.intercept.loc.detach().expand(4, 2)).log_prob(
+        train_data.target
+    )
+
+    # A finite raw value can only approach the family floor from above. Using
+    # EPS as the pre-floor softplus value therefore gives the 2*EPS fallback.
+    # rtol covers float32 inverse-link rounding at that scale; atol=1e-12 is
+    # small enough that losing the EPS-scale value cannot be masked.
+    torch.testing.assert_close(linked, torch.tensor(expected), rtol=1e-6, atol=1e-12)
+    assert torch.isfinite(log_prob).all()
+
+
+@pytest.mark.parametrize("family", [NormalFamily(), BetaFamily()])
+def test_moment_initialization_is_not_applied_to_other_families(
+    family: BaseFamily,
+) -> None:
+    """The benchmark keeps the package's zero intercept default outside NBI."""
+    train_data = DataModule(
+        pd.DataFrame({"x": range(4), "target": [0.2, 0.4, 0.6, 0.8]}),
+        response="target",
+        numeric_scaling={},
+    )
+    config = yaml.safe_load(
+        Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
+    )
+
+    model = _build_dune_bayes_model(train_data, family, config)
+
+    assert torch.equal(model.intercept.loc, torch.zeros(2))
 
 
 def test_bounded_dataset_runs_with_beta(tmp_path: Path) -> None:

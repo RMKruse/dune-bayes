@@ -1,4 +1,4 @@
-"""UCI benchmark runner and response-scale scoring (ADR-0008, GitHub #102–#175)."""
+"""UCI benchmark panel runner and scoring (ADR-0008, GitHub #102–#103, #176)."""
 
 from __future__ import annotations
 
@@ -251,11 +251,27 @@ def _build_dune_bayes_model(
         )
         for feature in train_data.features
     }
-    return BayesianNAMLSS(
+    model = BayesianNAMLSS(
         formula=formula,
         family=family,
         n_obs=train_data.n_obs,
     )
+    if isinstance(family, NegativeBinomialFamily):
+        target = train_data.target
+        mean = target.mean()
+        variance = target.var(correction=0)
+        dispersion = (
+            (variance - mean) / mean.square() if mean > EPS else mean.new_tensor(EPS)
+        )
+        # The family adds EPS after softplus. Subtract it before the stable
+        # inverse link; an EPS softplus floor gives the finite 2*EPS Poisson
+        # limit when either empirical moment is non-positive (GitHub #176).
+        linked = torch.stack((mean, dispersion))
+        positive = (linked - EPS).clamp_min(EPS)
+        raw = positive + torch.log(-torch.expm1(-positive))
+        with torch.no_grad():
+            model.intercept.loc.copy_(raw.to(model.intercept.loc))
+    return model
 
 
 def _score_dataset(
