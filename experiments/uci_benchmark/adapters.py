@@ -1,4 +1,4 @@
-"""Common predictive adapter for benchmark models (ADR-0008, GitHub #103).
+"""Common predictive adapter for benchmark models (ADR-0008, GitHub #103/#175).
 
 Related approaches such as a plain MLP and deep ensemble are deliberately
 evaluated here as sanity floors: unlike dune-bayes, they do not model separate
@@ -15,7 +15,7 @@ import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 import torch
@@ -48,6 +48,115 @@ class PredictiveResult:
     parameter_draws: torch.Tensor | None = None
 
 
+@dataclass(frozen=True)
+class ResponseTransform:
+    """Train-only response standardization (ADR-0008, GitHub #175).
+
+    Attributes:
+        method: Standard affine scaling or identity for native-support families.
+        loc: Training-response location used by the affine transform.
+        scale: Training-response scale used by the affine transform.
+    """
+
+    method: Literal["standard", "identity"]
+    loc: float
+    scale: float
+
+    @classmethod
+    def fit(cls, target: torch.Tensor, *, family: str) -> ResponseTransform:
+        """Fit an affine transform from benchmark training responses only.
+
+        Args:
+            target: Training responses.
+            family: Configured benchmark family name.
+
+        Returns:
+            Fitted standard or identity response transform.
+
+        Raises:
+            ValueError: If the benchmark family is unsupported.
+        """
+        if family in ("beta", "negative_binomial"):
+            return cls(method="identity", loc=0.0, scale=1.0)
+        if family != "normal":
+            raise ValueError(f"Unsupported benchmark response family {family!r}.")
+        return cls(
+            method="standard",
+            loc=float(target.mean()),
+            # The named floor keeps constant responses finite (numerical rule 3).
+            scale=max(float(target.std(unbiased=False)), EPS),
+        )
+
+    def to_model_scale(self, target: torch.Tensor) -> torch.Tensor:
+        """Apply the fitted transform without refitting on held-out rows.
+
+        Args:
+            target: Responses on their original scale.
+
+        Returns:
+            Responses on the model's scale.
+        """
+        return (target - self.loc) / self.scale
+
+    def to_original_prediction(self, prediction: PredictiveResult) -> PredictiveResult:
+        """Restore predictions and log-density to original response units.
+
+        Args:
+            prediction: Predictive quantities on model scale.
+
+        Returns:
+            Predictive samples and density on original scale; CDF unchanged.
+        """
+        return PredictiveResult(
+            samples=prediction.samples * self.scale + self.loc,
+            # p_y(y) = p_z((y-loc)/scale) / scale.
+            log_density=prediction.log_density - math.log(self.scale),
+            cdf=prediction.cdf,
+            parameter_draws=prediction.parameter_draws,
+        )
+
+    def to_model_prediction(self, prediction: PredictiveResult) -> PredictiveResult:
+        """Convert original-scale predictive quantities to model units.
+
+        Args:
+            prediction: Predictive quantities on original response scale.
+
+        Returns:
+            Predictive samples and density on model scale; CDF unchanged.
+        """
+        return PredictiveResult(
+            samples=(prediction.samples - self.loc) / self.scale,
+            log_density=prediction.log_density + math.log(self.scale),
+            cdf=prediction.cdf,
+            parameter_draws=prediction.parameter_draws,
+        )
+
+    def to_original_normal_parameters(
+        self, loc: torch.Tensor, scale: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Restore Normal location and scale parameters to response units.
+
+        Args:
+            loc: Model-scale Normal locations.
+            scale: Model-scale Normal standard deviations.
+
+        Returns:
+            Original-scale ``(location, standard deviation)`` tensors.
+        """
+        return loc * self.scale + self.loc, scale * self.scale
+
+    def to_original_variance(self, variance: torch.Tensor) -> torch.Tensor:
+        """Restore a model-scale variance to squared response units.
+
+        Args:
+            variance: Model-scale variance values.
+
+        Returns:
+            Original-scale variance values.
+        """
+        return variance * self.scale**2
+
+
 class BenchmarkAdapter(Protocol):
     """Small interface shared by every benchmark model."""
 
@@ -67,6 +176,40 @@ class BenchmarkAdapter(Protocol):
         seed: int,
     ) -> PredictiveResult:
         """Return held-out predictive samples, log-density, and CDF."""
+
+
+def predict_on_original_scale(
+    adapter: BenchmarkAdapter,
+    response_transform: ResponseTransform,
+    features: Mapping[str, torch.Tensor],
+    target: torch.Tensor,
+    *,
+    draws: int,
+    predictive_samples: int,
+    seed: int,
+) -> PredictiveResult:
+    """Run one adapter and restore its predictive contract (GitHub #175).
+
+    Args:
+        adapter: Benchmark model adapter.
+        response_transform: Shared transform fitted on training responses.
+        features: Held-out model features.
+        target: Held-out responses on original scale.
+        draws: Number of distribution-parameter draws.
+        predictive_samples: Number of response draws.
+        seed: Predictive sampling seed.
+
+    Returns:
+        Predictive quantities on original response scale.
+    """
+    prediction = adapter.predict(
+        features,
+        response_transform.to_model_scale(target),
+        draws=draws,
+        predictive_samples=predictive_samples,
+        seed=seed,
+    )
+    return response_transform.to_original_prediction(prediction)
 
 
 class DuneBayesAdapter:
@@ -157,9 +300,18 @@ class BamlssFixtureAdapter:
     name = "bamlss_reference"
     uncertainty_scope = "distributional_bamlss_fixture"
 
-    def __init__(self, *, dataset: str, fixture_dir: Path) -> None:
+    def __init__(
+        self,
+        *,
+        dataset: str,
+        fixture_dir: Path,
+        response_transform: ResponseTransform,
+        n_fit: int,
+    ) -> None:
         self._dataset = dataset
         self._fixture_dir = fixture_dir
+        self._response_transform = response_transform
+        self._n_fit = n_fit
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fixtures were already fit by the seeded R script."""
@@ -190,6 +342,29 @@ class BamlssFixtureAdapter:
                 raise RuntimeError(
                     f"BAMLSS fixture provenance is missing required key {key!r}."
                 )
+        transform = provenance.get("response_transform")
+        if not isinstance(transform, dict):
+            raise RuntimeError("BAMLSS fixture is missing response-transform metadata.")
+        if (
+            transform.get("method") != self._response_transform.method
+            or transform.get("fit_partition") != "train"
+            or transform.get("n_fit") != self._n_fit
+            or not math.isclose(
+                float(transform.get("loc", math.nan)),
+                self._response_transform.loc,
+                rel_tol=0.0,
+                abs_tol=EPS,
+            )
+            or not math.isclose(
+                float(transform.get("scale", math.nan)),
+                self._response_transform.scale,
+                rel_tol=0.0,
+                abs_tol=EPS,
+            )
+        ):
+            raise RuntimeError(
+                "BAMLSS fixture response transform does not match the shared split."
+            )
 
         with prediction_path.open(encoding="utf-8", newline="") as handle:
             rows = list(csv.DictReader(handle))
@@ -232,7 +407,9 @@ class BamlssFixtureAdapter:
             raise RuntimeError("BAMLSS fixture contains non-finite log_density.")
         if not bool(((cdf >= 0.0) & (cdf <= 1.0)).all()):
             raise RuntimeError("BAMLSS fixture CDF values must be inside [0, 1].")
-        return PredictiveResult(samples=samples, log_density=log_density, cdf=cdf)
+        return self._response_transform.to_model_prediction(
+            PredictiveResult(samples=samples, log_density=log_density, cdf=cdf)
+        )
 
 
 class _PlainMLP(torch.nn.Module):
@@ -278,25 +455,18 @@ class PlainMLPAdapter:
         self._epochs = epochs
         self._learning_rate = learning_rate
         self._model: _PlainMLP | None = None
-        self._target_loc = torch.tensor(0.0)
-        self._target_scale = torch.tensor(1.0)
         self._residual_scale = torch.tensor(1.0)
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fit the point predictor, then estimate its Gaussian residual scale."""
         features = _feature_matrix(train_data.features)
         target = train_data.target
-        self._target_loc = target.mean()
-        # Adding the named floor under the square root keeps constant-response
-        # fixtures finite without a magic clamp on a learned quantity.
-        self._target_scale = torch.sqrt(target.var(unbiased=False) + EPS)
-        standardized_target = (target - self._target_loc) / self._target_scale
         model = _PlainMLP(features.shape[-1], self._hidden_dims)
         optimizer = torch.optim.Adam(model.parameters(), lr=self._learning_rate)
         epochs = 1 if smoke else self._epochs
         for _ in range(epochs):
             optimizer.zero_grad()
-            loss = torch.nn.functional.mse_loss(model(features), standardized_target)
+            loss = torch.nn.functional.mse_loss(model(features), target)
             loss.backward()
             optimizer.step()
         self._model = model
@@ -305,11 +475,11 @@ class PlainMLPAdapter:
             self._residual_scale = torch.sqrt(residual.square().mean() + EPS)
 
     def _mean(self, features: torch.Tensor) -> torch.Tensor:
-        """Return response-scale means from a fitted network."""
+        """Return model-scale means from a fitted network."""
         if self._model is None:
             raise RuntimeError("fit() must be called before predict().")
         mean: torch.Tensor = self._model(features)
-        return mean * self._target_scale + self._target_loc
+        return mean
 
     def predict(
         self,
