@@ -1,6 +1,6 @@
 """BayesianNAMLSS — walking skeleton with KL warm-up.
 
-ADR-0001/0003/0004, issue 0003/0004/0007 / GitHub #4/#5/#8.
+ADR-0001/0003/0004, issue 0003/0004/0007 / GitHub #4/#5/#8/#178.
 
 Additive Bayesian model: per-feature shape functions → sum → family distribution.
 Training objective: mean-NLL + KL/N (negative ELBO).
@@ -29,7 +29,7 @@ Design:
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -278,6 +278,8 @@ class BayesianNAMLSS(nn.Module):
         batch_size: int | None = None,
         seed: int | None = None,
         callbacks: list | None = None,
+        epoch_end_callbacks: list[Callable[[int, Mapping[str, float]], bool]]
+        | None = None,
     ) -> dict[str, list[float]]:
         """Train the model on (X, y) using the ELBO loss.
 
@@ -307,6 +309,8 @@ class BayesianNAMLSS(nn.Module):
                 (CLAUDE.md seeding rule, GitHub #90).
             callbacks: Optional list of callables with signature (epoch: int) → None,
                 called at the start of each epoch alongside the warm-up callback.
+            epoch_end_callbacks: Optional callables receiving the zero-based epoch and
+                that epoch's loss/NLL/KL values. Training stops when one returns true.
 
         Returns:
             History dict with keys 'loss', 'nll', 'kl' — one value per epoch.
@@ -372,6 +376,18 @@ class BayesianNAMLSS(nn.Module):
             history["loss"].append(epoch_loss / n_batches)
             history["nll"].append(epoch_nll / n_batches)
             history["kl"].append(epoch_kl / n_batches)
+            if epoch_end_callbacks and any(
+                callback(
+                    epoch,
+                    {
+                        "loss": history["loss"][-1],
+                        "nll": history["nll"][-1],
+                        "kl": history["kl"][-1],
+                    },
+                )
+                for callback in epoch_end_callbacks
+            ):
+                break
 
         self.eval()
         return history

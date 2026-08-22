@@ -1,8 +1,9 @@
-"""UCI benchmark panel runner and scoring (ADR-0008, GitHub #102–#103, #176–#177)."""
+"""UCI benchmark runner (ADR-0008, GitHub #102–#103, #176–#178)."""
 
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import importlib
 import json
@@ -187,18 +188,51 @@ def _prepare_dataset(
                 temporary.unlink(missing_ok=True)
 
     split_path = split_dir / f"{cache_key}.npz"
-    if split_path.exists():
-        return
     n_rows = len(pd.read_csv(cached))
-    rng = np.random.default_rng(int(dataset["split_seed"]))
-    indices = rng.permutation(n_rows)
-    n_test = max(1, round(n_rows * float(config["data"]["test_fraction"])))
+    if split_path.exists():
+        with np.load(split_path) as persisted:
+            if "validation_indices" in persisted:
+                return
+            train_indices = persisted["train_indices"].copy()
+            test_indices = persisted["test_indices"].copy()
+    else:
+        rng = np.random.default_rng(int(dataset["split_seed"]))
+        indices = rng.permutation(n_rows)
+        n_test = max(1, round(n_rows * float(config["data"]["test_fraction"])))
+        train_indices = np.sort(indices[n_test:])
+        test_indices = np.sort(indices[:n_test])
+    validation_seed = int(dataset["split_seed"]) + 1_000_000
+    validation_order = np.random.default_rng(validation_seed).permutation(train_indices)
+    validation_fraction = float(config["data"]["validation_fraction"])
+    if not 0.0 < validation_fraction < 1.0:
+        raise ValueError("data.validation_fraction must be inside (0, 1).")
+    if len(train_indices) < 2:
+        raise ValueError("An outer training partition needs at least two rows.")
+    n_validation = max(
+        1,
+        round(len(train_indices) * validation_fraction),
+    )
+    n_validation = min(n_validation, len(train_indices) - 1)
     np.savez(
         split_path,
-        train_indices=np.sort(indices[n_test:]),
-        test_indices=np.sort(indices[:n_test]),
+        train_indices=train_indices,
+        fit_indices=np.sort(validation_order[n_validation:]),
+        validation_indices=np.sort(validation_order[:n_validation]),
+        validation_seed=np.asarray(validation_seed),
+        test_indices=test_indices,
         n_rows=np.asarray(n_rows),
     )
+
+
+def _data_subset(
+    preprocessing: DataModule, frame: pd.DataFrame, *, response: str
+) -> DataModule:
+    """Reuse one fitted preprocessing state for a persisted row subset."""
+    subset = copy.copy(preprocessing)
+    subset.features = preprocessing.transform(frame)
+    subset.target = torch.tensor(frame[response].to_numpy(), dtype=torch.float32)
+    subset.n_obs = len(frame)
+    return subset
 
 
 def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
@@ -306,16 +340,21 @@ def _score_dataset(
     cache_key = _cache_key(dataset, smoke=smoke)
     frame = pd.read_csv(_data_path(config, "cache_dir") / f"{cache_key}.csv")
     with np.load(_data_path(config, "split_dir") / f"{cache_key}.npz") as split:
-        train = frame.iloc[split["train_indices"]].reset_index(drop=True)
+        outer_train = frame.iloc[split["train_indices"]].reset_index(drop=True)
+        fit = frame.iloc[split["fit_indices"]].reset_index(drop=True)
+        validation = frame.iloc[split["validation_indices"]].reset_index(drop=True)
         test = frame.iloc[split["test_indices"]].reset_index(drop=True)
 
     response = str(dataset["response"])
-    train_data = DataModule(train, response=response, numeric_scaling={})
-    test_features = train_data.transform(test)
+    preprocessing = DataModule(outer_train, response=response, numeric_scaling={})
+    train_data = _data_subset(preprocessing, fit, response=response)
+    validation_data = _data_subset(preprocessing, validation, response=response)
+    test_features = preprocessing.transform(test)
     test_target = torch.tensor(test[response].to_numpy(), dtype=torch.float32)
     family_name = str(dataset["family"])
-    response_transform = ResponseTransform.fit(train_data.target, family=family_name)
+    response_transform = ResponseTransform.fit(preprocessing.target, family=family_name)
     train_data.target = response_transform.to_model_scale(train_data.target)
+    validation_data.target = response_transform.to_model_scale(validation_data.target)
     transform_path = paths.metrics / name / "response_transform.json"
     transform_path.parent.mkdir(parents=True, exist_ok=True)
     transform_path.write_text(
@@ -324,7 +363,7 @@ def _score_dataset(
                 "fit_partition": "train",
                 "loc": response_transform.loc,
                 "method": response_transform.method,
-                "n_fit": train_data.n_obs,
+                "n_fit": preprocessing.n_obs,
                 "scale": response_transform.scale,
             },
             indent=2,
@@ -348,14 +387,34 @@ def _score_dataset(
         else int(config["predictive_samples"])
     )
     comparison: list[dict[str, object]] = []
+    training = config["training"]
+    check_every = int(training["validation_check_every"])
+    patience_checks = int(training["validation_patience_checks"])
+    validation_draws = int(training["validation_draws"])
 
     def score(
         adapter: BenchmarkAdapter,
         scored_family: str,
         metric_dir: Path | None = None,
-    ) -> PredictiveResult:
+    ) -> PredictiveResult | None:
         """Fit and score one adapter through the shared contract."""
         adapter.fit(train_data, smoke=smoke)
+        training_metadata = getattr(adapter, "training_metadata", None)
+        if training_metadata:
+            destination = metric_dir or paths.metrics / name / adapter.name
+            destination.mkdir(parents=True, exist_ok=True)
+            (destination / "training.json").write_text(
+                json.dumps(
+                    training_metadata,
+                    allow_nan=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            if training_metadata["status"] == "failed":
+                return None
         result = predict_on_original_scale(
             adapter,
             response_transform,
@@ -385,16 +444,22 @@ def _score_dataset(
         learning_rate=float(config["training"]["learning_rate"]),
         warmup_epochs=int(config["training"]["warmup_epochs"]),
         randomized_pit=family_name == "negative_binomial",
+        validation_data=validation_data,
+        check_every=check_every,
+        patience_checks=patience_checks,
+        validation_draws=min(validation_draws, 16) if smoke else validation_draws,
+        validation_seed=int(config["seed"]),
     )
     prediction = score(adapter, family_name, paths.metrics / name)
-    _write_dune_bayes_uncertainty(
-        prediction,
-        model=model,
-        dataset=name,
-        family=family_name,
-        metric_dir=paths.metrics / name,
-        response_transform=response_transform,
-    )
+    if prediction is not None:
+        _write_dune_bayes_uncertainty(
+            prediction,
+            model=model,
+            dataset=name,
+            family=family_name,
+            metric_dir=paths.metrics / name,
+            response_transform=response_transform,
+        )
 
     deterministic_model = _build_dune_bayes_model(
         train_data,
@@ -409,6 +474,11 @@ def _score_dataset(
         learning_rate=float(config["training"]["learning_rate"]),
         warmup_epochs=0,
         randomized_pit=family_name == "negative_binomial",
+        validation_data=validation_data,
+        check_every=check_every,
+        patience_checks=patience_checks,
+        validation_draws=1,
+        validation_seed=int(config["seed"]),
     )
     score(deterministic, family_name)
     bayesnam_config = config.get("baselines", {}).get("bayesnam_style", {})
@@ -433,16 +503,22 @@ def _score_dataset(
             learning_rate=float(config["training"]["learning_rate"]),
             warmup_epochs=int(config["training"]["warmup_epochs"]),
             randomized_pit=False,
+            validation_data=validation_data,
+            check_every=check_every,
+            patience_checks=patience_checks,
+            validation_draws=min(validation_draws, 16) if smoke else validation_draws,
+            validation_seed=int(config["seed"]),
         )
         bayesnam_prediction = score(bayesnam, "normal_homoscedastic")
-        _write_bayesnam_band_contrast(
-            prediction,
-            bayesnam_prediction,
-            dataset=name,
-            family=family_name,
-            figure_dir=paths.figures / name,
-            response_transform=response_transform,
-        )
+        if prediction is not None and bayesnam_prediction is not None:
+            _write_bayesnam_band_contrast(
+                prediction,
+                bayesnam_prediction,
+                dataset=name,
+                family=family_name,
+                figure_dir=paths.figures / name,
+                response_transform=response_transform,
+            )
     namlss_config = config.get("baselines", {}).get("namlss", {})
     if bool(namlss_config.get("enabled", False)):
         namlss: BenchmarkAdapter = NampyNamlssAdapter(
@@ -472,7 +548,7 @@ def _score_dataset(
             dataset=name,
             fixture_dir=_experiment_path(str(bamlss_config["fixture_dir"])),
             response_transform=response_transform,
-            n_fit=train_data.n_obs,
+            n_fit=preprocessing.n_obs,
         )
         score(bamlss, family_name)
     plain: BenchmarkAdapter = PlainMLPAdapter(
@@ -481,6 +557,9 @@ def _score_dataset(
         epochs=int(config["training"]["epochs"]),
         learning_rate=float(config["training"]["learning_rate"]),
         randomized_pit=family_name == "negative_binomial",
+        validation_data=validation_data,
+        check_every=check_every,
+        patience_checks=patience_checks,
     )
     score(plain, family_name)
     ensemble: BenchmarkAdapter = DeepEnsembleAdapter(
@@ -490,6 +569,9 @@ def _score_dataset(
         epochs=int(config["training"]["epochs"]),
         learning_rate=float(config["training"]["learning_rate"]),
         randomized_pit=family_name == "negative_binomial",
+        validation_data=validation_data,
+        check_every=check_every,
+        patience_checks=patience_checks,
     )
     score(ensemble, family_name)
     mean_only_config = config["baselines"].get("mean_only_gaussian", {})

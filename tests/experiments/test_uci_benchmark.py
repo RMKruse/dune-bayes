@@ -32,9 +32,11 @@ from dune_bayes.metrics import crps, pit
 from dune_bayes.utils import EPS
 from experiments.uci_benchmark.adapters import (
     DeepEnsembleAdapter,
+    DuneBayesAdapter,
     PlainMLPAdapter,
     PredictiveResult,
     ResponseTransform,
+    mean_mixture_nll,
     predict_on_original_scale,
 )
 from experiments.uci_benchmark.run import _build_dune_bayes_model
@@ -83,8 +85,13 @@ def test_smoke_persists_one_split_and_reuses_it_across_runs(tmp_path: Path) -> N
     first_mtime = split_path.stat().st_mtime_ns
     with np.load(split_path) as split:
         train = split["train_indices"]
+        fit = split["fit_indices"]
+        validation = split["validation_indices"]
         test = split["test_indices"]
         assert set(train).isdisjoint(test)
+        assert set(fit).isdisjoint(validation)
+        assert sorted(np.concatenate((fit, validation)).tolist()) == train.tolist()
+        assert int(split["validation_seed"]) == 1_010_201
         assert sorted(np.concatenate((train, test)).tolist()) == list(
             range(int(split["n_rows"]))
         )
@@ -93,6 +100,141 @@ def test_smoke_persists_one_split_and_reuses_it_across_runs(tmp_path: Path) -> N
     assert second.returncode == 0, second.stderr
     assert split_path.read_bytes() == first_bytes
     assert split_path.stat().st_mtime_ns == first_mtime
+
+
+def test_plain_mlp_restores_best_validation_checkpoint() -> None:
+    """The public adapter fit contract stops on checks and restores its winner."""
+    torch.manual_seed(178)
+    train = DataModule(
+        pd.DataFrame({"x": [-1.0, 0.0, 1.0], "y": [-1.0, 0.0, 1.0]}),
+        response="y",
+        numeric_scaling={},
+    )
+    validation = DataModule(
+        pd.DataFrame({"x": [-0.5, 0.5], "y": [-0.5, 0.5]}),
+        response="y",
+        numeric_scaling={},
+    )
+    adapter = PlainMLPAdapter(
+        NormalFamily(),
+        hidden_dims=[2],
+        epochs=5,
+        learning_rate=0.0,
+        randomized_pit=False,
+        validation_data=validation,
+        check_every=1,
+        patience_checks=1,
+    )
+
+    adapter.fit(train, smoke=False)
+
+    assert adapter.training_metadata["status"] == "completed"
+    assert adapter.training_metadata["epochs_completed"] == 2
+    assert adapter.training_metadata["best_epoch"] == 1
+    assert adapter.training_metadata["restored_best_checkpoint"] is True
+    prediction = adapter.predict(
+        validation.features,
+        validation.target,
+        draws=1,
+        predictive_samples=2,
+        seed=178,
+    )
+    assert prediction.parameter_draws is not None
+    raw = prediction.parameter_draws.squeeze(0)
+    scale = F.softplus(raw[:, 1]) + EPS
+    reference_nll = (
+        torch.log(scale)
+        + 0.5 * math.log(2.0 * math.pi)
+        + 0.5 * ((validation.target - raw[:, 0]) / scale).square()
+    ).mean()
+    assert float(reference_nll) == pytest.approx(
+        adapter.training_metadata["best_validation_nll"],
+        rel=0.0,
+        # One float32 family evaluation separates the persisted Python float.
+        abs=1e-6,
+    )
+
+
+def test_plain_mlp_records_non_finite_validation_as_failure() -> None:
+    """A non-finite validation score is an explicit failed fit."""
+    train = DataModule(
+        pd.DataFrame({"x": [0.0, 1.0], "y": [0.0, 1.0]}),
+        response="y",
+        numeric_scaling={},
+    )
+    validation = DataModule(
+        pd.DataFrame({"x": [0.5], "y": [float("nan")]}),
+        response="y",
+        numeric_scaling={},
+    )
+    adapter = PlainMLPAdapter(
+        NormalFamily(),
+        hidden_dims=[2],
+        epochs=5,
+        learning_rate=0.0,
+        randomized_pit=False,
+        validation_data=validation,
+        check_every=1,
+        patience_checks=1,
+    )
+
+    adapter.fit(train, smoke=False)
+
+    assert adapter.training_metadata["status"] == "failed"
+    assert adapter.training_metadata["failure"] == "non_finite_validation_nll"
+    assert adapter.training_metadata["validation_checks"] == [{"epoch": 1, "nll": None}]
+
+
+def test_uniform_mixture_validation_nll_matches_hand_computed_reference() -> None:
+    """Validation mixtures use the analytic equal-weight density in log-space."""
+    component_density = torch.tensor([[0.25, 0.75], [0.75, 0.25]], dtype=torch.float64)
+
+    actual = mean_mixture_nll(torch.log(component_density))
+
+    # Both equal-weight mixture densities are exactly 0.5.
+    assert actual == pytest.approx(math.log(2.0), rel=0.0, abs=1e-12)
+
+
+def test_dune_validation_starts_after_warmup_and_reuses_draw_seed() -> None:
+    """DUNE checks only post-warm-up and repeats its seeded score trajectory."""
+    data = DataModule(
+        pd.DataFrame({"x": [-1.0, -0.5, 0.5, 1.0], "y": [-1.0, -0.5, 0.5, 1.0]}),
+        response="y",
+        numeric_scaling={},
+    )
+    config = {
+        "architecture": {
+            "hidden_dims": [2],
+            "prior_scale": 1.0,
+            "activation": "tanh",
+        }
+    }
+
+    def fit_once() -> dict[str, object]:
+        """Build and fit one identically seeded DUNE validation trajectory."""
+        torch.manual_seed(178)
+        model = _build_dune_bayes_model(data, NormalFamily(), config)
+        adapter = DuneBayesAdapter(
+            model,
+            NormalFamily(),
+            epochs=3,
+            learning_rate=0.01,
+            warmup_epochs=1,
+            randomized_pit=False,
+            validation_data=data,
+            check_every=1,
+            patience_checks=5,
+            validation_draws=4,
+            validation_seed=901,
+        )
+        adapter.fit(data, smoke=False)
+        return adapter.training_metadata
+
+    first = fit_once()
+    second = fit_once()
+
+    assert [item["epoch"] for item in first["validation_checks"]] == [2, 3]
+    assert first["validation_checks"] == second["validation_checks"]
 
 
 def _read_rows(path: Path) -> list[dict[str, str]]:
@@ -823,6 +965,45 @@ def test_panel_config_declares_exactly_four_family_matched_models() -> None:
 
     assert config["primary_models"] == list(_PRIMARY_MODELS)
     assert config["baselines"]["deep_ensemble_members"] == 5
+    assert config["data"]["validation_fraction"] == 0.2
+    assert config["training"]["epochs"] == 500
+    assert config["training"]["validation_check_every"] == 10
+    assert config["training"]["validation_patience_checks"] == 5
+
+
+def test_smoke_persists_primary_training_and_checkpoint_metadata(
+    tmp_path: Path,
+) -> None:
+    """Primary models expose the frozen stopping contract in run artifacts."""
+    completed = _run_smoke(_smoke_config(tmp_path))
+    assert completed.returncode == 0, completed.stderr
+
+    metric_root = (
+        tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics" / "autompg"
+    )
+    paths = {
+        "dune_bayes": metric_root / "training.json",
+        "deterministic_namlss": metric_root / "deterministic_namlss" / "training.json",
+        "plain_mlp": metric_root / "plain_mlp" / "training.json",
+        "deep_ensemble": metric_root / "deep_ensemble" / "training.json",
+    }
+    metadata = {
+        model: json.loads(path.read_text(encoding="utf-8"))
+        for model, path in paths.items()
+    }
+
+    assert all(item["status"] == "completed" for item in metadata.values())
+    assert all(item["epochs_ceiling"] == 500 for item in metadata.values())
+    assert all(item["check_every"] == 10 for item in metadata.values())
+    assert all(item["patience_checks"] == 5 for item in metadata.values())
+    assert all(item["restored_best_checkpoint"] is True for item in metadata.values())
+    assert metadata["dune_bayes"]["monitor_start_epoch"] == 20
+    assert metadata["dune_bayes"]["validation_seed"] == 102
+    assert set(metadata["dune_bayes"]["history"]) == {"loss", "nll", "kl"}
+    members = metadata["deep_ensemble"]["members"]
+    assert len(members) == 5
+    assert all(member["restored_best_checkpoint"] is True for member in members)
+    assert np.isfinite(metadata["deep_ensemble"]["candidate_selection_validation_nll"])
 
 
 def test_deterministic_namlss_has_zero_kl_through_the_additive_model_boundary() -> None:

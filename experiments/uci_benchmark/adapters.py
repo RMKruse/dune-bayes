@@ -1,4 +1,4 @@
-"""Common predictive adapter for benchmark models (ADR-0008, GitHub #103/#175/#177).
+"""Common benchmark adapters (ADR-0008, GitHub #103/#175/#177/#178).
 
 The four primary adapters share family links and scoring; supplemental
 mean-only comparators remain labeled separately.
@@ -6,15 +6,16 @@ mean-only comparators remain labeled separately.
 
 from __future__ import annotations
 
+import copy
 import csv
 import json
 import math
 import subprocess
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, Protocol
+from typing import Literal, Protocol, cast
 
 import numpy as np
 import torch
@@ -218,8 +219,115 @@ def predict_on_original_scale(
     return response_transform.to_original_prediction(prediction)
 
 
+@dataclass
+class _ValidationCheckpoint:
+    """Track one validation-NLL winner and its patience budget (GitHub #178)."""
+
+    patience_checks: int
+    best_epoch: int | None = None
+    best_nll: float | None = None
+    best_state: dict[str, torch.Tensor] | None = None
+    checks_without_improvement: int = 0
+    failure: str | None = None
+    trace: list[dict[str, float | int | None]] = field(default_factory=list)
+
+    def observe(
+        self, epoch: int, validation_nll: float, model: torch.nn.Module
+    ) -> bool:
+        """Record a check and return whether training must stop."""
+        if not math.isfinite(validation_nll):
+            self.trace.append({"epoch": epoch, "nll": None})
+            self.failure = "non_finite_validation_nll"
+            return True
+        self.trace.append({"epoch": epoch, "nll": validation_nll})
+        if self.best_nll is None or validation_nll < self.best_nll:
+            self.best_epoch = epoch
+            self.best_nll = validation_nll
+            self.best_state = copy.deepcopy(model.state_dict())
+            self.checks_without_improvement = 0
+        else:
+            self.checks_without_improvement += 1
+        return self.checks_without_improvement >= self.patience_checks
+
+    def restore(self, model: torch.nn.Module) -> bool:
+        """Restore the best finite checkpoint when one was observed."""
+        if self.best_state is None:
+            return False
+        model.load_state_dict(self.best_state)
+        return True
+
+    def metadata(
+        self,
+        *,
+        epochs_ceiling: int,
+        epochs_completed: int,
+        effective_epochs: int,
+        check_every: int,
+        monitor_start_epoch: int,
+        validation_seed: int | None,
+        validation_draws: int,
+        history: dict[str, list[float]],
+    ) -> dict[str, object]:
+        """Return JSON-ready stopping and checkpoint evidence."""
+        return {
+            "status": "failed" if self.failure else "completed",
+            "failure": self.failure,
+            "epochs_ceiling": epochs_ceiling,
+            "epochs_completed": epochs_completed,
+            "stopped_early": epochs_completed < effective_epochs,
+            "check_every": check_every,
+            "patience_checks": self.patience_checks,
+            "monitor_start_epoch": monitor_start_epoch,
+            "validation_seed": validation_seed,
+            "validation_draws": validation_draws,
+            "validation_checks": self.trace,
+            "best_epoch": self.best_epoch,
+            "best_validation_nll": self.best_nll,
+            "restored_best_checkpoint": self.best_state is not None,
+            "history": history,
+        }
+
+
+def _check_validation(
+    epoch: int, *, epochs: int, check_every: int, monitor_start_epoch: int
+) -> bool:
+    """Check on the frozen cadence and once at a shorter smoke/final ceiling."""
+    return (epoch > monitor_start_epoch and epoch % check_every == 0) or epoch == epochs
+
+
+def mean_mixture_nll(log_density: torch.Tensor) -> float:
+    """Return mean NLL for equally weighted log-density rows (GitHub #178).
+
+    Args:
+        log_density: Per-component pointwise log densities, shape ``(T, n)``.
+
+    Returns:
+        Mean negative log density of the uniform mixture.
+    """
+    return float(
+        -(
+            torch.logsumexp(log_density.to(torch.float64), dim=0)
+            - math.log(int(log_density.shape[0]))
+        ).mean()
+    )
+
+
 class DuneBayesAdapter:
-    """Expose ``BayesianNAMLSS`` through the benchmark prediction contract."""
+    """Expose ``BayesianNAMLSS`` through the benchmark prediction contract.
+
+    Args:
+        model: Additive Bayesian or deterministic NAMLSS model.
+        family: Dataset response family and parameter links.
+        epochs: Full-run epoch ceiling.
+        learning_rate: Adam learning rate.
+        warmup_epochs: KL warm-up length before validation monitoring.
+        randomized_pit: Whether to randomize PIT on discrete support.
+        validation_data: Persisted validation partition shared by the panel.
+        check_every: Epoch cadence for validation NLL.
+        patience_checks: Checks without improvement before stopping.
+        validation_draws: Fixed posterior draw count for validation NLL.
+        validation_seed: Fixed posterior draw seed for validation NLL.
+    """
 
     name = "dune_bayes"
     comparison_role = "primary"
@@ -234,6 +342,11 @@ class DuneBayesAdapter:
         learning_rate: float,
         warmup_epochs: int,
         randomized_pit: bool,
+        validation_data: DataModule,
+        check_every: int,
+        patience_checks: int,
+        validation_draws: int,
+        validation_seed: int,
     ) -> None:
         self._model = model
         self._family = family
@@ -241,16 +354,65 @@ class DuneBayesAdapter:
         self._learning_rate = learning_rate
         self._warmup_epochs = warmup_epochs
         self._randomized_pit = randomized_pit
+        self._validation_data = validation_data
+        self._check_every = check_every
+        self._patience_checks = patience_checks
+        self._validation_draws = validation_draws
+        self._validation_seed = validation_seed
+        self.training_metadata: dict[str, object] = {}
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fit dune-bayes with the configured full or smoke budget."""
         epochs = 1 if smoke else self._epochs
-        self._model.fit(
+        tracker = _ValidationCheckpoint(self._patience_checks)
+
+        def validate(epoch: int, logs: Mapping[str, float]) -> bool:
+            """Evaluate the persisted validation rows after warm-up."""
+            del logs
+            epoch_number = epoch + 1
+            if not _check_validation(
+                epoch_number,
+                epochs=epochs,
+                check_every=self._check_every,
+                monitor_start_epoch=min(self._warmup_epochs, epochs),
+            ):
+                return False
+            with torch.random.fork_rng():
+                torch.manual_seed(self._validation_seed)
+                posterior = draw_predictive(
+                    self._model,
+                    self._validation_data.features,
+                    T=self._validation_draws,
+                )
+                log_lik = pointwise_log_lik(
+                    self._model,
+                    posterior.summed_samples,
+                    self._validation_data.target,
+                ).to(torch.float64)
+                # The posterior mixture must stay in log-space when one draw
+                # assigns negligible validation density (numerical rule 2).
+                validation_nll = mean_mixture_nll(log_lik)
+            return tracker.observe(epoch_number, validation_nll, self._model)
+
+        history = self._model.fit(
             train_data,
             epochs=epochs,
             lr=self._learning_rate,
             warmup_epochs=min(self._warmup_epochs, epochs),
+            epoch_end_callbacks=[validate],
         )
+        restored = tracker.restore(self._model)
+        self.training_metadata = tracker.metadata(
+            epochs_ceiling=self._epochs,
+            epochs_completed=len(history["loss"]),
+            effective_epochs=epochs,
+            check_every=self._check_every,
+            monitor_start_epoch=self._warmup_epochs,
+            validation_seed=self._validation_seed,
+            validation_draws=self._validation_draws,
+            history=history,
+        )
+        self.training_metadata["restored_best_checkpoint"] = restored
 
     def predict(
         self,
@@ -470,6 +632,9 @@ class PlainMLPAdapter:
         epochs: Full-run training epochs.
         learning_rate: Adam learning rate.
         randomized_pit: Whether to randomize PIT on discrete support.
+        validation_data: Persisted validation partition shared by the panel.
+        check_every: Epoch cadence for validation NLL.
+        patience_checks: Checks without improvement before stopping.
     """
 
     name = "plain_mlp"
@@ -484,13 +649,20 @@ class PlainMLPAdapter:
         epochs: int,
         learning_rate: float,
         randomized_pit: bool,
+        validation_data: DataModule | None = None,
+        check_every: int = 10,
+        patience_checks: int = 5,
     ) -> None:
         self._family = family
         self._hidden_dims = hidden_dims
         self._epochs = epochs
         self._learning_rate = learning_rate
         self._randomized_pit = randomized_pit
+        self._validation_data = validation_data
+        self._check_every = check_every
+        self._patience_checks = patience_checks
         self._model: _PlainMLP | None = None
+        self.training_metadata: dict[str, object] = {}
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fit all raw family parameters by maximum likelihood.
@@ -501,17 +673,48 @@ class PlainMLPAdapter:
         """
         features = _feature_matrix(train_data.features)
         target = train_data.target
+        validation_data = self._validation_data or train_data
         model = _PlainMLP(
             features.shape[-1], self._family.param_count, self._hidden_dims
         )
         optimizer = torch.optim.Adam(model.parameters(), lr=self._learning_rate)
         epochs = 1 if smoke else self._epochs
-        for _ in range(epochs):
+        tracker = _ValidationCheckpoint(self._patience_checks)
+        history: dict[str, list[float]] = {"loss": []}
+        for epoch in range(1, epochs + 1):
             optimizer.zero_grad()
             loss = -self._family.log_prob(model(features), target).mean()
             loss.backward()
             optimizer.step()
+            history["loss"].append(float(loss.detach()))
+            if _check_validation(
+                epoch,
+                epochs=epochs,
+                check_every=self._check_every,
+                monitor_start_epoch=0,
+            ):
+                with torch.no_grad():
+                    validation_nll = float(
+                        -self._family.log_prob(
+                            model(_feature_matrix(validation_data.features)),
+                            validation_data.target,
+                        ).mean()
+                    )
+                if tracker.observe(epoch, validation_nll, model):
+                    break
+        restored = tracker.restore(model)
         self._model = model
+        self.training_metadata = tracker.metadata(
+            epochs_ceiling=self._epochs,
+            epochs_completed=len(history["loss"]),
+            effective_epochs=epochs,
+            check_every=self._check_every,
+            monitor_start_epoch=0,
+            validation_seed=None,
+            validation_draws=1,
+            history=history,
+        )
+        self.training_metadata["restored_best_checkpoint"] = restored
 
     def _params(self, features: torch.Tensor) -> torch.Tensor:
         """Return raw family parameters from a fitted network."""
@@ -928,6 +1131,9 @@ class DeepEnsembleAdapter:
         epochs: Full-run training epochs per member.
         learning_rate: Adam learning rate.
         randomized_pit: Whether to randomize PIT on discrete support.
+        validation_data: Persisted validation partition shared by all members.
+        check_every: Epoch cadence for validation NLL.
+        patience_checks: Checks without improvement before stopping.
     """
 
     name = "deep_ensemble"
@@ -943,11 +1149,18 @@ class DeepEnsembleAdapter:
         epochs: int,
         learning_rate: float,
         randomized_pit: bool,
+        validation_data: DataModule | None = None,
+        check_every: int = 10,
+        patience_checks: int = 5,
     ) -> None:
         if members < 2:
             raise ValueError("A deep ensemble requires at least two members.")
         self._family = family
         self._randomized_pit = randomized_pit
+        self._epochs = epochs
+        self._validation_data = validation_data
+        self._check_every = check_every
+        self._patience_checks = patience_checks
         self._members = [
             PlainMLPAdapter(
                 family,
@@ -955,9 +1168,13 @@ class DeepEnsembleAdapter:
                 epochs=epochs,
                 learning_rate=learning_rate,
                 randomized_pit=randomized_pit,
+                validation_data=validation_data,
+                check_every=check_every,
+                patience_checks=patience_checks,
             )
             for _ in range(members)
         ]
+        self.training_metadata: dict[str, object] = {}
 
     def fit(self, train_data: DataModule, *, smoke: bool) -> None:
         """Fit independently initialized members on the same training rows.
@@ -968,6 +1185,47 @@ class DeepEnsembleAdapter:
         """
         for member in self._members:
             member.fit(train_data, smoke=smoke)
+        validation_data = self._validation_data or train_data
+        members = [member.training_metadata for member in self._members]
+        failed = any(item["status"] == "failed" for item in members)
+        selection_nll: float | None = None
+        if not failed:
+            predictions = [
+                member.predict(
+                    validation_data.features,
+                    validation_data.target,
+                    draws=1,
+                    predictive_samples=1,
+                    seed=index,
+                )
+                for index, member in enumerate(self._members)
+            ]
+            selection_nll = mean_mixture_nll(
+                torch.stack([prediction.log_density for prediction in predictions])
+            )
+            failed = not math.isfinite(selection_nll)
+            if failed:
+                selection_nll = None
+        self.training_metadata = {
+            "status": "failed" if failed else "completed",
+            "failure": "non_finite_validation_nll" if failed else None,
+            "epochs_ceiling": self._epochs,
+            "epochs_completed": max(
+                cast(int, item["epochs_completed"]) for item in members
+            ),
+            "stopped_early": any(bool(item["stopped_early"]) for item in members),
+            "check_every": self._check_every,
+            "patience_checks": self._patience_checks,
+            "monitor_start_epoch": 0,
+            "validation_seed": None,
+            "validation_draws": 1,
+            "candidate_selection_validation_nll": selection_nll,
+            "restored_best_checkpoint": all(
+                bool(item["restored_best_checkpoint"]) for item in members
+            ),
+            "history": {},
+            "members": members,
+        }
 
     def predict(
         self,

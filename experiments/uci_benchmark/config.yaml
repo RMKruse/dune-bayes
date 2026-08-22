@@ -61,14 +61,18 @@ data:
   cache_dir: data/cache
   split_dir: data/splits
   test_fraction: 0.2
+  validation_fraction: 0.2
 architecture:
   hidden_dims: [16]
   prior_scale: 1.0
   activation: tanh
 training:
-  epochs: 250
+  epochs: 500
   learning_rate: 0.01
   warmup_epochs: 20
+  validation_check_every: 10
+  validation_patience_checks: 5
+  validation_draws: 32
 baselines:
   mean_only_gaussian:
     enabled: true
