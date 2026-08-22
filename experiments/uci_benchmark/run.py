@@ -1,4 +1,4 @@
-"""UCI benchmark runner (ADR-0008, GitHub #102–#103, #176–#179)."""
+"""UCI benchmark runner (ADR-0008, GitHub #102–#103, #176–#180)."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ import sys
 import time
 import urllib.request
 from collections.abc import Callable, Mapping, Sequence
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -520,6 +521,7 @@ def _score_dataset(
     paths: ArtifactPaths,
     *,
     smoke: bool,
+    selection_root: Path | None = None,
 ) -> list[dict[str, object]]:
     """Fit the family-matched panel and write held-out headline metrics."""
     name = str(dataset["name"])
@@ -595,6 +597,7 @@ def _score_dataset(
         validation_data: DataModule,
         *,
         procedure: str,
+        fit_seed: int,
     ) -> BenchmarkAdapter:
         """Build one primary model from one predeclared candidate slot."""
         candidate_config = copy.deepcopy(config)
@@ -653,7 +656,7 @@ def _score_dataset(
                 if smoke
                 else validation_draws
             ),
-            validation_seed=tuning_seed,
+            validation_seed=fit_seed,
         )
 
     primary_models = (
@@ -673,94 +676,178 @@ def _score_dataset(
             ],
         ),
     }
-    selection: dict[str, object] = {
-        "dataset": name,
-        "evidence_role": "bounded_smoke_only" if smoke else "selection_only",
-        "paper_claim_capable": False,
-        "objective": "validation_nll",
-        "tuning_seed": tuning_seed,
-        "materialized_candidates": materialized_candidates,
-        "executed_candidate_count": len(executed_candidates),
-        "procedures": {},
-    }
-    selected_adapters: dict[str, BenchmarkAdapter] = {}
-    candidate_train_data: DataModule | None = None
-    candidate_validation_data: DataModule | None = None
-    for procedure, (transform, interventions) in procedures.items():
-        train_data, validation_data = procedure_data(transform)
-        models: dict[str, object] = {}
-        for model_name in primary_models:
-
-            def build(
-                candidate: Mapping[str, object],
-                model_name: str = model_name,
-                train_data: DataModule = train_data,
-                validation_data: DataModule = validation_data,
-                procedure: str = procedure,
-            ) -> BenchmarkAdapter:
-                """Bind this procedure/model pair for the generic slot runner."""
-                return build_primary_adapter(
-                    model_name,
-                    candidate,
-                    train_data,
-                    validation_data,
-                    procedure=procedure,
-                )
-
-            adapter, evidence = select_model_candidate(
-                executed_candidates,
-                build=build,
-                train_data=train_data,
-                smoke=smoke,
-                tuning_seed=tuning_seed,
-            )
-            models[model_name] = evidence
-            if procedure == "C" and adapter is not None:
-                selected_adapters[model_name] = adapter
-        selection["procedures"][procedure] = {
-            "interventions": interventions,
-            "response_transform": {
-                "fit_partition": "train",
-                "loc": transform.loc,
-                "method": transform.method,
-                "n_fit": preprocessing.n_obs,
-                "scale": transform.scale,
-            },
-            "models": models,
-        }
-        if procedure == "C":
-            candidate_train_data = train_data
-            candidate_validation_data = validation_data
-
     selection_path = paths.metrics / name / "selection.json"
-    selection_path.write_text(
-        json.dumps(selection, allow_nan=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    missing = set(primary_models) - set(selected_adapters)
-    if missing:
-        raise RuntimeError(
-            f"No finite candidate winner for {name}: {', '.join(sorted(missing))}."
+    selected_adapters: dict[str, dict[str, BenchmarkAdapter | None]] = {
+        procedure: {} for procedure in procedures
+    }
+    procedure_datasets = {
+        procedure: procedure_data(transform)
+        for procedure, (transform, _) in procedures.items()
+    }
+    if selection_root is None:
+        selection: dict[str, object] = {
+            "dataset": name,
+            "evidence_role": "bounded_smoke_only" if smoke else "selection_only",
+            "paper_claim_capable": False,
+            "objective": "validation_nll",
+            "tuning_seed": tuning_seed,
+            "materialized_candidates": materialized_candidates,
+            "executed_candidate_count": len(executed_candidates),
+            "procedures": {},
+        }
+        for procedure, (transform, interventions) in procedures.items():
+            train_data, validation_data = procedure_datasets[procedure]
+            models: dict[str, object] = {}
+            for model_name in primary_models:
+
+                def build(
+                    candidate: Mapping[str, object],
+                    model_name: str = model_name,
+                    train_data: DataModule = train_data,
+                    validation_data: DataModule = validation_data,
+                    procedure: str = procedure,
+                ) -> BenchmarkAdapter:
+                    """Bind this procedure/model pair for the generic slot runner."""
+                    return build_primary_adapter(
+                        model_name,
+                        candidate,
+                        train_data,
+                        validation_data,
+                        procedure=procedure,
+                        fit_seed=tuning_seed,
+                    )
+
+                adapter, evidence = select_model_candidate(
+                    executed_candidates,
+                    build=build,
+                    train_data=train_data,
+                    smoke=smoke,
+                    tuning_seed=tuning_seed,
+                )
+                models[model_name] = evidence
+                selected_adapters[procedure][model_name] = adapter
+            selection["procedures"][procedure] = {
+                "interventions": interventions,
+                "response_transform": {
+                    "fit_partition": "train",
+                    "loc": transform.loc,
+                    "method": transform.method,
+                    "n_fit": preprocessing.n_obs,
+                    "scale": transform.scale,
+                },
+                "models": models,
+            }
+        selection_path.write_text(
+            json.dumps(selection, allow_nan=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
         )
-    if candidate_train_data is None or candidate_validation_data is None:
-        raise RuntimeError("Candidate procedure did not materialize training data.")
-    train_data = candidate_train_data
-    validation_data = candidate_validation_data
+    else:
+        source = selection_root / name / "selection.json"
+        frozen_selection = json.loads(source.read_text(encoding="utf-8"))
+        if frozen_selection["dataset"] != name:
+            raise ValueError(f"Frozen selection does not belong to dataset {name}.")
+        shutil.copyfile(source, selection_path)
+        evaluation: dict[str, object] = {
+            "dataset": name,
+            "seed": int(config["seed"]),
+            "selection_sha256": sha256(source.read_bytes()).hexdigest(),
+            "procedures": {},
+        }
+        for procedure in procedures:
+            train_data, validation_data = procedure_datasets[procedure]
+            evaluation_models: dict[str, object] = {}
+            for model_name in primary_models:
+                candidate = frozen_selection["procedures"][procedure]["models"][
+                    model_name
+                ]["selected_configuration"]
+                if candidate is None:
+                    evaluation_models[model_name] = {
+                        "candidate_slots": 0,
+                        "failures": 1,
+                        "selected_configuration": None,
+                        "trials": [],
+                    }
+                    selected_adapters[procedure][model_name] = None
+                    continue
+
+                def build(
+                    candidate: Mapping[str, object],
+                    model_name: str = model_name,
+                    train_data: DataModule = train_data,
+                    validation_data: DataModule = validation_data,
+                    procedure: str = procedure,
+                ) -> BenchmarkAdapter:
+                    """Bind one frozen winner to this evaluation seed."""
+                    return build_primary_adapter(
+                        model_name,
+                        candidate,
+                        train_data,
+                        validation_data,
+                        procedure=procedure,
+                        fit_seed=int(config["seed"]),
+                    )
+
+                adapter, evidence = select_model_candidate(
+                    [candidate],
+                    build=build,
+                    train_data=train_data,
+                    smoke=smoke,
+                    tuning_seed=int(config["seed"]),
+                )
+                evaluation_models[model_name] = evidence
+                selected_adapters[procedure][model_name] = adapter
+            evaluation["procedures"][procedure] = {"models": evaluation_models}
+        (paths.metrics / name / "evaluation.json").write_text(
+            json.dumps(evaluation, allow_nan=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    development = bool(config.get("development", {}).get("enabled", False)) or (
+        selection_root is not None
+    )
+    train_data, validation_data = procedure_datasets["C"]
     hidden_dims = [int(width) for width in config["architecture"]["hidden_dims"]]
 
     def score(
-        adapter: BenchmarkAdapter,
+        adapter: BenchmarkAdapter | None,
         scored_family: str,
-        metric_dir: Path | None = None,
         *,
+        model_name: str,
+        procedure: str = "C",
+        transform: ResponseTransform = response_transform,
+        fitted_data: DataModule = train_data,
+        metric_dir: Path | None = None,
         already_fitted: bool = False,
     ) -> PredictiveResult | None:
         """Fit and score one adapter through the shared contract."""
+        destination = metric_dir or paths.metrics / name / model_name
+        context = {
+            "procedure": procedure,
+            "seed": int(config["seed"]),
+            "split_seed": int(dataset["split_seed"]),
+        }
+        if adapter is None:
+            comparison.append(
+                {
+                    "comparison_role": "primary",
+                    "dataset": name,
+                    "family": scored_family,
+                    "model": model_name,
+                    **context,
+                    "uncertainty_scope": "predictive",
+                    "n_test": len(test_target),
+                    "mean_nll": "",
+                    "mean_crps": "",
+                    "calibration_error": "",
+                    "status": "model_failure",
+                    "failure": "no_finite_selected_candidate",
+                }
+            )
+            return None
         if not already_fitted:
-            adapter.fit(train_data, smoke=smoke)
+            adapter.fit(fitted_data, smoke=smoke)
         training_metadata = getattr(adapter, "training_metadata", None)
         if training_metadata:
-            destination = metric_dir or paths.metrics / name / adapter.name
             destination.mkdir(parents=True, exist_ok=True)
             (destination / "training.json").write_text(
                 json.dumps(
@@ -773,15 +860,33 @@ def _score_dataset(
                 encoding="utf-8",
             )
             if training_metadata["status"] == "failed":
+                comparison.append(
+                    {
+                        "comparison_role": adapter.comparison_role,
+                        "dataset": name,
+                        "family": scored_family,
+                        "model": adapter.name,
+                        **context,
+                        "uncertainty_scope": getattr(
+                            adapter, "uncertainty_scope", "predictive"
+                        ),
+                        "n_test": len(test_target),
+                        "mean_nll": "",
+                        "mean_crps": "",
+                        "calibration_error": "",
+                        "status": "model_failure",
+                        "failure": training_metadata.get("failure", "fit_failed"),
+                    }
+                )
                 return None
         result = predict_on_original_scale(
             adapter,
-            response_transform,
+            transform,
             test_features,
             test_target,
             draws=draws_count,
             predictive_samples=predictive_samples,
-            seed=int(dataset["split_seed"]),
+            seed=int(config["seed"]) if development else int(dataset["split_seed"]),
         )
         comparison.extend(
             _write_scores(
@@ -791,15 +896,54 @@ def _score_dataset(
                 dataset=name,
                 family=scored_family,
                 bins=int(config["calibration_bins"]),
-                metric_dir=metric_dir or paths.metrics / name / adapter.name,
+                metric_dir=destination,
+                context=context,
             )
         )
         return result
 
-    adapter = selected_adapters["dune_bayes"]
+    if development:
+        for procedure, (transform, _) in procedures.items():
+            fitted_data, _ = procedure_datasets[procedure]
+            for model_name in primary_models:
+                adapter = selected_adapters[procedure].get(model_name)
+                metric_dir = paths.metrics / name / procedure / model_name
+                prediction = score(
+                    adapter,
+                    family_name,
+                    model_name=model_name,
+                    procedure=procedure,
+                    transform=transform,
+                    fitted_data=fitted_data,
+                    metric_dir=metric_dir,
+                    already_fitted=True,
+                )
+                if (
+                    procedure == "C"
+                    and model_name == "dune_bayes"
+                    and prediction is not None
+                    and isinstance(adapter, DuneBayesAdapter)
+                ):
+                    _write_dune_bayes_uncertainty(
+                        prediction,
+                        model=adapter.model,
+                        dataset=name,
+                        family=family_name,
+                        metric_dir=metric_dir,
+                        response_transform=transform,
+                    )
+        return comparison
+
+    adapter = selected_adapters["C"]["dune_bayes"]
     if not isinstance(adapter, DuneBayesAdapter):
         raise TypeError("The selected DUNE adapter lost its model contract.")
-    prediction = score(adapter, family_name, paths.metrics / name, already_fitted=True)
+    prediction = score(
+        adapter,
+        family_name,
+        model_name="dune_bayes",
+        metric_dir=paths.metrics / name,
+        already_fitted=True,
+    )
     if prediction is not None:
         _write_dune_bayes_uncertainty(
             prediction,
@@ -811,8 +955,9 @@ def _score_dataset(
         )
 
     score(
-        selected_adapters["deterministic_namlss"],
+        selected_adapters["C"]["deterministic_namlss"],
         family_name,
+        model_name="deterministic_namlss",
         already_fitted=True,
     )
     bayesnam_config = config.get("baselines", {}).get("bayesnam_style", {})
@@ -843,7 +988,11 @@ def _score_dataset(
             validation_draws=min(validation_draws, 16) if smoke else validation_draws,
             validation_seed=int(config["seed"]),
         )
-        bayesnam_prediction = score(bayesnam, "normal_homoscedastic")
+        bayesnam_prediction = score(
+            bayesnam,
+            "normal_homoscedastic",
+            model_name=bayesnam.name,
+        )
         if prediction is not None and bayesnam_prediction is not None:
             _write_bayesnam_band_contrast(
                 prediction,
@@ -864,7 +1013,7 @@ def _score_dataset(
             learning_rate=float(config["training"]["learning_rate"]),
             batch_size=int(namlss_config.get("batch_size", 512)),
         )
-        score(namlss, family_name)
+        score(namlss, family_name, model_name=namlss.name)
     lanam_config = config.get("baselines", {}).get("lanam", {})
     if bool(lanam_config.get("enabled", False)):
         lanam: BenchmarkAdapter = LANAMAdapter(
@@ -875,7 +1024,7 @@ def _score_dataset(
             learning_rate=float(config["training"]["learning_rate"]),
             batch_size=int(lanam_config.get("batch_size", 512)),
         )
-        score(lanam, "mean_only_laplace_gaussian")
+        score(lanam, "mean_only_laplace_gaussian", model_name=lanam.name)
     bamlss_config = config.get("baselines", {}).get("bamlss_reference", {})
     if bool(bamlss_config.get("enabled", False)):
         bamlss: BenchmarkAdapter = BamlssFixtureAdapter(
@@ -884,9 +1033,19 @@ def _score_dataset(
             response_transform=response_transform,
             n_fit=preprocessing.n_obs,
         )
-        score(bamlss, family_name)
-    score(selected_adapters["plain_mlp"], family_name, already_fitted=True)
-    score(selected_adapters["deep_ensemble"], family_name, already_fitted=True)
+        score(bamlss, family_name, model_name=bamlss.name)
+    score(
+        selected_adapters["C"]["plain_mlp"],
+        family_name,
+        model_name="plain_mlp",
+        already_fitted=True,
+    )
+    score(
+        selected_adapters["C"]["deep_ensemble"],
+        family_name,
+        model_name="deep_ensemble",
+        already_fitted=True,
+    )
     mean_only_config = config["baselines"].get("mean_only_gaussian", {})
     if family_name == "normal" and bool(mean_only_config.get("enabled", False)):
         mean_only: BenchmarkAdapter = MeanOnlyGaussianAdapter(
@@ -894,7 +1053,7 @@ def _score_dataset(
             epochs=int(config["training"]["epochs"]),
             learning_rate=float(config["training"]["learning_rate"]),
         )
-        score(mean_only, "gaussian_residual")
+        score(mean_only, "gaussian_residual", model_name=mean_only.name)
     return comparison
 
 
@@ -1078,17 +1237,19 @@ def _write_scores(
     family: str,
     bins: int,
     metric_dir: Path,
+    context: Mapping[str, object] | None = None,
 ) -> list[dict[str, object]]:
     """Score one adapter prediction and write its public metric artifacts."""
     nll = -prediction.log_density
     crps_values = crps(prediction.samples, target)
     pit_values = prediction.cdf.to(torch.float64)
 
-    summary = {
+    summary: dict[str, object] = {
         "comparison_role": adapter.comparison_role,
         "dataset": dataset,
         "family": family,
         "model": adapter.name,
+        **(context or {}),
         "n_test": len(target),
     }
     _write_csv(
@@ -1099,7 +1260,19 @@ def _write_scores(
         metric_dir / "crps.csv",
         [{**summary, "mean_crps": float(crps_values.mean())}],
     )
-    counts, edges = np.histogram(pit_values.numpy(), bins=bins, range=(0.0, 1.0))
+    pit_array = pit_values.numpy()
+    valid_pit = bool(
+        pit_array.size == len(target)
+        and np.isfinite(pit_array).all()
+        and ((pit_array >= 0.0) & (pit_array <= 1.0)).all()
+    )
+    if valid_pit:
+        counts, edges = np.histogram(pit_array, bins=bins, range=(0.0, 1.0))
+    else:
+        # Invalid observation-level PIT values are evidence of model failure, not
+        # values that may be silently dropped by histogram aggregation.
+        counts = np.zeros(bins, dtype=np.int64)
+        edges = np.linspace(0.0, 1.0, bins + 1)
     _write_csv(
         metric_dir / "calibration.csv",
         [
@@ -1115,17 +1288,35 @@ def _write_scores(
         ],
     )
     fractions = counts / len(target)
+    mean_nll = float(nll.mean())
+    mean_crps = float(crps_values.mean())
+    calibration_error = float(np.abs(fractions - 1.0 / bins).mean())
+    finite = all(
+        np.isfinite(value) for value in (mean_nll, mean_crps, calibration_error)
+    )
+    # A one-bin histogram is structurally saturated, independent of float error.
+    saturated = bool((counts == len(target)).any())
     return [
         {
-            "comparison_role": adapter.comparison_role,
-            "dataset": dataset,
-            "family": family,
-            "model": adapter.name,
+            **summary,
             "uncertainty_scope": getattr(adapter, "uncertainty_scope", "predictive"),
-            "n_test": len(target),
-            "mean_nll": float(nll.mean()),
-            "mean_crps": float(crps_values.mean()),
-            "calibration_error": float(np.abs(fractions - 1.0 / bins).mean()),
+            "mean_nll": mean_nll,
+            "mean_crps": mean_crps,
+            "calibration_error": calibration_error,
+            "status": (
+                "completed"
+                if finite and valid_pit and not saturated
+                else "model_failure"
+            ),
+            "failure": (
+                ""
+                if finite and valid_pit and not saturated
+                else "invalid_pit"
+                if not valid_pit
+                else "saturated_pit"
+                if saturated
+                else "non_finite_metric"
+            ),
         }
     ]
 
@@ -1136,6 +1327,7 @@ def _run(
     smoke: bool,
     *,
     dataset_name: str | None = None,
+    selection_root: Path | None = None,
 ) -> None:
     """Prepare and score the configured benchmark datasets."""
     datasets = config["datasets"]
@@ -1148,7 +1340,15 @@ def _run(
     comparison: list[dict[str, object]] = []
     for dataset in datasets:
         _prepare_dataset(config, dataset, smoke=smoke)
-        comparison.extend(_score_dataset(config, dataset, paths, smoke=smoke))
+        comparison.extend(
+            _score_dataset(
+                config,
+                dataset,
+                paths,
+                smoke=smoke,
+                selection_root=selection_root,
+            )
+        )
     _write_csv(paths.metrics / "comparison.csv", comparison)
 
 
@@ -1162,13 +1362,20 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("config", type=Path)
     parser.add_argument("--smoke", action="store_true")
     parser.add_argument("--dataset")
+    parser.add_argument("--selection-root", type=Path)
     args = parser.parse_args(argv)
 
     def selected_run(
         config: Mapping[str, Any], paths: ArtifactPaths, smoke: bool
     ) -> None:
         """Bind the optional public dataset selector to the harness callback."""
-        _run(config, paths, smoke, dataset_name=args.dataset)
+        _run(
+            config,
+            paths,
+            smoke,
+            dataset_name=args.dataset,
+            selection_root=args.selection_root,
+        )
 
     run_experiment(args.config, smoke=args.smoke, experiment=selected_run)
 

@@ -41,6 +41,7 @@ from experiments.uci_benchmark.adapters import (
 )
 from experiments.uci_benchmark.run import (
     _build_dune_bayes_model,
+    _write_scores,
     materialize_candidate_plan,
     select_model_candidate,
 )
@@ -60,7 +61,10 @@ def _smoke_config(tmp_path: Path, *, seed: int = 102) -> Path:
 
 
 def _run_smoke(
-    config_path: Path, *, dataset: str | None = None
+    config_path: Path,
+    *,
+    dataset: str | None = None,
+    selection_root: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run the public smoke command."""
     command = [
@@ -71,6 +75,8 @@ def _run_smoke(
     ]
     if dataset is not None:
         command.extend(("--dataset", dataset))
+    if selection_root is not None:
+        command.extend(("--selection-root", str(selection_root)))
     return subprocess.run(
         command,
         check=False,
@@ -478,6 +484,32 @@ def test_smoke_writes_nll_crps_and_pit_calibration_tables(tmp_path: Path) -> Non
     assert len(calibration) == 10
     assert sum(int(row["count"]) for row in calibration) == int(nll[0]["n_test"])
     assert np.isclose(sum(float(row["fraction"]) for row in calibration), 1.0)
+
+
+def test_invalid_observation_pit_is_a_model_failure(tmp_path: Path) -> None:
+    """A NaN PIT cannot disappear inside histogram aggregation."""
+
+    class StubAdapter:
+        name = "stub"
+        comparison_role = "primary"
+        uncertainty_scope = "predictive"
+
+    rows = _write_scores(
+        PredictiveResult(
+            samples=torch.tensor([[0.0, 1.0], [0.5, 1.5]]),
+            log_density=torch.zeros(2, dtype=torch.float64),
+            cdf=torch.tensor([float("nan"), 0.5], dtype=torch.float64),
+        ),
+        adapter=StubAdapter(),
+        target=torch.tensor([0.0, 1.0]),
+        dataset="synthetic",
+        family="normal",
+        bins=10,
+        metric_dir=tmp_path,
+    )
+
+    assert rows[0]["status"] == "model_failure"
+    assert rows[0]["failure"] == "invalid_pit"
 
 
 def test_dune_bayes_is_scored_through_the_common_comparison_table(
@@ -991,6 +1023,13 @@ def test_panel_config_materializes_the_frozen_twelve_candidate_budget() -> None:
     assert config["architecture"]["activation"] == "tanh"
     assert config["architecture"]["prior_scale"] == 1.0
     assert config["baselines"]["deep_ensemble_members"] == 5
+    assert config["development"] == {
+        "run_seeds": [102, 112, 122],
+        "comparator_candidates": ["plain_mlp", "deep_ensemble"],
+        "comparator_tie_winner": "deep_ensemble",
+        "selected_candidate_failure_limit": 1,
+        "confirmation_run_seeds": [202, 212, 222],
+    }
     materialized, executed = materialize_candidate_plan(config, smoke=False)
     assert len(materialized) == len(executed) == 12
     assert {
@@ -1063,6 +1102,38 @@ def test_candidate_selection_consumes_failures_and_uses_stable_nll_ties() -> Non
     assert len(evidence["trials"]) == 4
     assert evidence["trials"][1]["parameter_count"] == 3
     json.dumps(evidence, allow_nan=False)
+
+
+def test_locked_winners_are_refit_for_later_development_seeds(tmp_path: Path) -> None:
+    """Later seeds consume one frozen winner per procedure/model without retuning."""
+    first = _run_smoke(_smoke_config(tmp_path, seed=102))
+    assert first.returncode == 0, first.stderr
+    selection_root = tmp_path / "runs" / "uci_benchmark" / "seed-102" / "metrics"
+
+    second = _run_smoke(
+        _smoke_config(tmp_path, seed=112), selection_root=selection_root
+    )
+
+    assert second.returncode == 0, second.stderr
+    metric_root = tmp_path / "runs" / "uci_benchmark" / "seed-112" / "metrics"
+    rows = _read_rows(metric_root / "comparison.csv")
+    primary = [row for row in rows if row["comparison_role"] == "primary"]
+    assert {(row["procedure"], row["model"]) for row in primary} == {
+        (procedure, model) for procedure in ("R", "C") for model in _PRIMARY_MODELS
+    }
+    assert {int(row["seed"]) for row in primary} == {112}
+    evaluation = json.loads(
+        (metric_root / "autompg" / "evaluation.json").read_text(encoding="utf-8")
+    )
+    assert evaluation["seed"] == 112
+    assert all(
+        evidence["candidate_slots"] == 1
+        for procedure in evaluation["procedures"].values()
+        for evidence in procedure["models"].values()
+    )
+    assert (metric_root / "autompg" / "selection.json").read_bytes() == (
+        selection_root / "autompg" / "selection.json"
+    ).read_bytes()
 
 
 def test_smoke_persists_primary_training_and_checkpoint_metadata(

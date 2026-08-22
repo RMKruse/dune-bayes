@@ -76,6 +76,12 @@ tuning:
     - [32, 32]
   learning_rates: [0.001, 0.003, 0.01]
   smoke_candidate_count: 2
+development:
+  run_seeds: [102, 112, 122]
+  comparator_candidates: [plain_mlp, deep_ensemble]
+  comparator_tie_winner: deep_ensemble
+  selected_candidate_failure_limit: 1
+  confirmation_run_seeds: [202, 212, 222]
 training:
   epochs: 500
   learning_rate: 0.01

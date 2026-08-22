@@ -1,0 +1,10 @@
+procedure,model,selected_fits,completed,model_failures,infrastructure_failures
+R,dune_bayes,30,27,3,0
+R,deterministic_namlss,30,27,3,0
+R,plain_mlp,30,27,3,0
+R,deep_ensemble,30,27,3,0
+C,dune_bayes,30,30,0,0
+C,deterministic_namlss,30,30,0,0
+C,plain_mlp,30,30,0,0
+C,deep_ensemble,30,30,0,0
+,artifact_production,0,0,0,0

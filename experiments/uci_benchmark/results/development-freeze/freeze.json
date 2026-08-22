@@ -1,0 +1,189 @@
+{
+  "artifact_hashes_sha256": "54896a44eac6c340a59910aa3a053e1c4095ba9d7296542bea850f42e47ebad4",
+  "completeness_errors": [],
+  "confirmation": {
+    "run_seeds": [
+      202,
+      212,
+      222
+    ],
+    "scores_generated": false,
+    "split_run_pairs": [
+      {
+        "dataset": "autompg",
+        "run_seed": 202,
+        "split_seed": 20201
+      },
+      {
+        "dataset": "concrete",
+        "run_seed": 202,
+        "split_seed": 20202
+      },
+      {
+        "dataset": "energy",
+        "run_seed": 202,
+        "split_seed": 20203
+      },
+      {
+        "dataset": "kin8nm",
+        "run_seed": 202,
+        "split_seed": 20204
+      },
+      {
+        "dataset": "naval",
+        "run_seed": 202,
+        "split_seed": 20205
+      },
+      {
+        "dataset": "power",
+        "run_seed": 202,
+        "split_seed": 20206
+      },
+      {
+        "dataset": "protein",
+        "run_seed": 202,
+        "split_seed": 20207
+      },
+      {
+        "dataset": "wine",
+        "run_seed": 202,
+        "split_seed": 20208
+      },
+      {
+        "dataset": "yacht",
+        "run_seed": 202,
+        "split_seed": 20209
+      },
+      {
+        "dataset": "bike",
+        "run_seed": 202,
+        "split_seed": 20210
+      },
+      {
+        "dataset": "autompg",
+        "run_seed": 212,
+        "split_seed": 21201
+      },
+      {
+        "dataset": "concrete",
+        "run_seed": 212,
+        "split_seed": 21202
+      },
+      {
+        "dataset": "energy",
+        "run_seed": 212,
+        "split_seed": 21203
+      },
+      {
+        "dataset": "kin8nm",
+        "run_seed": 212,
+        "split_seed": 21204
+      },
+      {
+        "dataset": "naval",
+        "run_seed": 212,
+        "split_seed": 21205
+      },
+      {
+        "dataset": "power",
+        "run_seed": 212,
+        "split_seed": 21206
+      },
+      {
+        "dataset": "protein",
+        "run_seed": 212,
+        "split_seed": 21207
+      },
+      {
+        "dataset": "wine",
+        "run_seed": 212,
+        "split_seed": 21208
+      },
+      {
+        "dataset": "yacht",
+        "run_seed": 212,
+        "split_seed": 21209
+      },
+      {
+        "dataset": "bike",
+        "run_seed": 212,
+        "split_seed": 21210
+      },
+      {
+        "dataset": "autompg",
+        "run_seed": 222,
+        "split_seed": 22201
+      },
+      {
+        "dataset": "concrete",
+        "run_seed": 222,
+        "split_seed": 22202
+      },
+      {
+        "dataset": "energy",
+        "run_seed": 222,
+        "split_seed": 22203
+      },
+      {
+        "dataset": "kin8nm",
+        "run_seed": 222,
+        "split_seed": 22204
+      },
+      {
+        "dataset": "naval",
+        "run_seed": 222,
+        "split_seed": 22205
+      },
+      {
+        "dataset": "power",
+        "run_seed": 222,
+        "split_seed": 22206
+      },
+      {
+        "dataset": "protein",
+        "run_seed": 222,
+        "split_seed": 22207
+      },
+      {
+        "dataset": "wine",
+        "run_seed": 222,
+        "split_seed": 22208
+      },
+      {
+        "dataset": "yacht",
+        "run_seed": 222,
+        "split_seed": 22209
+      },
+      {
+        "dataset": "bike",
+        "run_seed": 222,
+        "split_seed": 22210
+      }
+    ]
+  },
+  "confirmation_inputs_complete": true,
+  "development_run_seeds": [
+    102,
+    112,
+    122
+  ],
+  "development_split_seeds": {
+    "autompg": 10201,
+    "bike": 10210,
+    "concrete": 10202,
+    "energy": 10203,
+    "kin8nm": 10204,
+    "naval": 10205,
+    "power": 10206,
+    "protein": 10207,
+    "wine": 10208,
+    "yacht": 10209
+  },
+  "evidence_role": "development_freeze",
+  "issue": 180,
+  "package_default_promoted": false,
+  "paper_claim_promoted": false,
+  "selected_candidate_failure_limit": 1,
+  "selected_candidate_model_failures": 0,
+  "split_hashes_sha256": "bc64a816974a74cae18678e0b99e58cc542e1400c7f3627d04f0b174d37fc8ba"
+}

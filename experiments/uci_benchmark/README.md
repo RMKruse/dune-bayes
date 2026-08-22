@@ -43,6 +43,32 @@ procedures. Its artifact is labeled `bounded_smoke_only` and
 `paper_claim_capable: false`; it verifies orchestration but cannot support the
 full benchmark or any paper claim.
 
+## Development freeze
+
+Issue #180 evaluates the seed-102 selection winners on development run seeds
+`102`, `112`, and `122`, keeping split seeds `10201` through `10210` unchanged.
+Run the resumable dataset-level panel and build its confirmation-input freeze:
+
+```bash
+uv run --extra experiments python experiments/uci_benchmark/development.py \
+  experiments/uci_benchmark/config.yaml --run
+```
+
+Add `--smoke` for the one-dataset tracer. Seed 102 executes the complete frozen
+candidate grid; seeds 112 and 122 refit only the selected configurations. The
+freeze records both R and C raw scores, paired gaps, separate model contrasts,
+dataset-level win/loss summaries, failure incidence, selected configurations,
+complete selection/evaluation traces, split fingerprints, comparator B identities,
+and SHA-256 hashes.
+Comparator B is chosen separately for every dataset and metric from the lower
+candidate-procedure development median of `plain_mlp` and `deep_ensemble`, with
+exact ties selecting the ensemble.
+
+The freeze explicitly records that confirmation scores have not been generated
+and that no package default or paper claim is promoted. Full runs are written
+under ignored `runs/`; the reviewed freeze lands at
+`results/development-freeze/`.
+
 Each dataset writes `metrics/<dataset>/nll.csv`, `crps.csv`, and
 `calibration.csv`. NLL is the held-out posterior-predictive negative
 log-likelihood (`logsumexp` over coherent draws), CRPS is the package's fair
