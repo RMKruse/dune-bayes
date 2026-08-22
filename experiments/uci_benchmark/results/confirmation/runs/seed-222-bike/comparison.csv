@@ -1,0 +1,9 @@
+comparison_role,dataset,family,model,procedure,seed,split_seed,n_test,uncertainty_scope,mean_nll,mean_crps,calibration_error,status,failure
+primary,bike,negative_binomial,dune_bayes,R,222,22210,3476,distributional_parameter_bands,7.034446962752033,145.06928407563112,0.09964326812428079,completed,
+primary,bike,negative_binomial,deterministic_namlss,R,222,22210,3476,deterministic_distributional,7.15885873871102,148.94211527312393,0.10349827387802073,completed,
+primary,bike,negative_binomial,plain_mlp,R,222,22210,3476,deterministic_distributional,7.9670835139424945,167.94709816641338,0.13894131185270425,completed,
+primary,bike,negative_binomial,deep_ensemble,R,222,22210,3476,ensemble_distributional,7.903839087079341,167.89666543904838,0.1388837744533947,completed,
+primary,bike,negative_binomial,dune_bayes,C,222,22210,3476,distributional_parameter_bands,6.056769225887936,80.77515804220639,0.00805523590333717,completed,
+primary,bike,negative_binomial,deterministic_namlss,C,222,22210,3476,deterministic_distributional,7.15885873871102,148.86460726977546,0.10349827387802073,completed,
+primary,bike,negative_binomial,plain_mlp,C,222,22210,3476,deterministic_distributional,7.9670835139424945,167.94709816641338,0.13894131185270425,completed,
+primary,bike,negative_binomial,deep_ensemble,C,222,22210,3476,ensemble_distributional,7.903839087079341,167.89666543904838,0.1388837744533947,completed,

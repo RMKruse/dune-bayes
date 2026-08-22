@@ -1,0 +1,9 @@
+comparison_role,dataset,family,model,procedure,seed,split_seed,n_test,uncertainty_scope,mean_nll,mean_crps,calibration_error,status,failure
+primary,autompg,normal,dune_bayes,R,202,20201,78,distributional_parameter_bands,3.3129295181353418,3.32011172077074,0.08923076923076924,completed,
+primary,autompg,normal,deterministic_namlss,R,202,20201,78,deterministic_distributional,3.322342186402052,3.1475114705995426,0.04615384615384616,completed,
+primary,autompg,normal,plain_mlp,R,202,20201,78,deterministic_distributional,2.9481735038451657,2.7072797238759736,0.0687179487179487,completed,
+primary,autompg,normal,deep_ensemble,R,202,20201,78,ensemble_distributional,2.9937084200976742,2.6354376219217315,0.062051282051282054,completed,
+primary,autompg,normal,dune_bayes,C,202,20201,78,distributional_parameter_bands,2.563791845985121,1.5714518723976674,0.07692307692307693,completed,
+primary,autompg,normal,deterministic_namlss,C,202,20201,78,deterministic_distributional,2.404362663429431,1.4906379339363094,0.038974358974358976,completed,
+primary,autompg,normal,plain_mlp,C,202,20201,78,deterministic_distributional,2.2954180097288712,1.4434385573657307,0.036410256410256414,completed,
+primary,autompg,normal,deep_ensemble,C,202,20201,78,ensemble_distributional,2.3803481442124115,1.5635062863351041,0.0358974358974359,completed,

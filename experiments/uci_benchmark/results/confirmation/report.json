@@ -1,0 +1,261 @@
+{
+  "development_artifact_hashes_sha256": "54896a44eac6c340a59910aa3a053e1c4095ba9d7296542bea850f42e47ebad4",
+  "development_freeze_sha256": "d17bd8492a78d02ba0b7984088f9b7bca969ea5e9b50a9a417f3dcab4cf868e8",
+  "evidence_role": "locked_confirmation",
+  "failure_gate_scope": "procedure_C_dune_bayes_30_fits",
+  "guardrails": {
+    "all_panel_rows_passed_numerical_gate": false,
+    "code": {
+      "passed": true,
+      "status": "passed",
+      "stderr": "",
+      "stdout": ".................                                                        [100%]\n17 passed in 1.96s\n",
+      "tests": [
+        "tests/sampling/test_effect_sampler.py::test_additive_predictor_reconstructs_from_separate_effects",
+        "tests/sampling/test_effect_sampler.py::test_all_feature_names_returned",
+        "tests/sampling/test_effect_sampler.py::test_effect_bands_are_reportable_on_original_covariate_scale",
+        "tests/data/test_numeric_preprocessing.py::test_plot_grid_inverse_transform_recovers_original_scale",
+        "tests/families/test_link_floor_gate.py::test_extreme_pre_link_log_prob_is_finite",
+        "tests/layers/test_variational_dense.py::test_collect_kl_reaches_all_variational_layers",
+        "tests/model/test_nan_gradient_gate.py"
+      ]
+    },
+    "frozen_artifacts": {
+      "frozen_commit": "cc08b2ff8bd0f882f18a3ef14e2c68bceb615863",
+      "passed": true,
+      "pointwise_recovery": {
+        "accepted_reference": 0.10087890625,
+        "max_cell_nonregression_margin": 0.05,
+        "maximum_cell_coverage_error": 0.16718750000000004,
+        "mean_absolute_coverage_error": 0.10087890625000001,
+        "mean_nonregression_margin": 0.02
+      },
+      "sha256": {
+        "experiments/hmc_agreement/results/canonical/metrics/band_width_ratios.csv": "bd17d936a310de55c475f6803ef4850d1a174551fa357c6d3b3ad1895e7b3067",
+        "experiments/hmc_agreement/results/canonical/metrics/diagnostics.json": "c9ab041607ecb3c99d88738d0b04b3481d68326c4d734e402191ea5af5fd5e02",
+        "experiments/hmc_agreement/results/canonical/run.json": "64e45b4d9980fd8222201dda0881d446009742124d2d51fca14b0246566280f5",
+        "experiments/parameter_recovery/results/canonical-normal/arrays/recovery.npz": "f226e1d2c642acbe579ca00304a2932ce6effc4cd0fb195759a135e1c7b4d32e",
+        "experiments/parameter_recovery/results/canonical-normal/metrics/calibration.csv": "a3a80ca99231636b213d0c40759c880a8f7f036a154e21570da9d1614c1798df",
+        "experiments/parameter_recovery/results/canonical-normal/run.json": "c01aeca712ef336be28bc0249c2e3c6a4f82e38ebf32e9422fc36865a240634b",
+        "experiments/publication/prior-smoothness-calibration-decision.yaml": "f697890db128a3b64487becaf978c4722f407cd0ac575a7038e9ab8fee39e17f"
+      },
+      "vi_to_nuts": {
+        "divergences": 0,
+        "ess_bulk_min": 1330.4240579230996,
+        "maximum_normalized_center_difference": 0.026170762633400707,
+        "maximum_width_ratio": 0.48394045009706116,
+        "minimum_accepted_width_ratio_minus_margin": 0.36168390794728095,
+        "minimum_width_ratio": 0.41168390794728094,
+        "overwidth_review_triggered": false,
+        "r_hat_max": 1.0037415328129553
+      }
+    },
+    "selected_candidate_numerical_gate": true
+  },
+  "human_downgrade_allowed": true,
+  "human_upgrade_allowed": false,
+  "infrastructure_repairs": 0,
+  "issue": 181,
+  "mechanically_earned_tier": "Material",
+  "package_default_promoted": false,
+  "panel_bounded": true,
+  "panel_model_or_numerical_failures": 12,
+  "pit": {
+    "candidate_failed_runs": 0,
+    "candidate_saturated_runs": 0,
+    "datasets_within_equivalence_band_or_better": 9,
+    "median_raw_reduction": 0.022580645161290325,
+    "panel_nonregression": true,
+    "reference_failed_runs": 0,
+    "reference_saturated_runs": 3,
+    "tier": "Strong"
+  },
+  "predictive_metrics": [
+    {
+      "already_competitive_datasets": 1,
+      "failed_runs": 3,
+      "median_gap_closure": 0.38370648771687144,
+      "metric": "nll",
+      "panel_nonregression": true,
+      "preserved_datasets": 1,
+      "stable_datasets": 9,
+      "supporting_datasets": 9,
+      "tier": "Material",
+      "within_nonregression_band_or_preserved": 9
+    },
+    {
+      "already_competitive_datasets": 1,
+      "failed_runs": 3,
+      "median_gap_closure": 0.6376896796447658,
+      "metric": "crps",
+      "panel_nonregression": true,
+      "preserved_datasets": 1,
+      "stable_datasets": 9,
+      "supporting_datasets": 9,
+      "tier": "Strong",
+      "within_nonregression_band_or_preserved": 9
+    }
+  ],
+  "raw_score_count": 240,
+  "reference_model_or_numerical_failures": 12,
+  "reported_tier": "Material",
+  "selected_candidate_model_or_numerical_failures": 0,
+  "split_run_pairs": [
+    {
+      "dataset": "autompg",
+      "run_seed": 202,
+      "split_seed": 20201
+    },
+    {
+      "dataset": "concrete",
+      "run_seed": 202,
+      "split_seed": 20202
+    },
+    {
+      "dataset": "energy",
+      "run_seed": 202,
+      "split_seed": 20203
+    },
+    {
+      "dataset": "kin8nm",
+      "run_seed": 202,
+      "split_seed": 20204
+    },
+    {
+      "dataset": "naval",
+      "run_seed": 202,
+      "split_seed": 20205
+    },
+    {
+      "dataset": "power",
+      "run_seed": 202,
+      "split_seed": 20206
+    },
+    {
+      "dataset": "protein",
+      "run_seed": 202,
+      "split_seed": 20207
+    },
+    {
+      "dataset": "wine",
+      "run_seed": 202,
+      "split_seed": 20208
+    },
+    {
+      "dataset": "yacht",
+      "run_seed": 202,
+      "split_seed": 20209
+    },
+    {
+      "dataset": "bike",
+      "run_seed": 202,
+      "split_seed": 20210
+    },
+    {
+      "dataset": "autompg",
+      "run_seed": 212,
+      "split_seed": 21201
+    },
+    {
+      "dataset": "concrete",
+      "run_seed": 212,
+      "split_seed": 21202
+    },
+    {
+      "dataset": "energy",
+      "run_seed": 212,
+      "split_seed": 21203
+    },
+    {
+      "dataset": "kin8nm",
+      "run_seed": 212,
+      "split_seed": 21204
+    },
+    {
+      "dataset": "naval",
+      "run_seed": 212,
+      "split_seed": 21205
+    },
+    {
+      "dataset": "power",
+      "run_seed": 212,
+      "split_seed": 21206
+    },
+    {
+      "dataset": "protein",
+      "run_seed": 212,
+      "split_seed": 21207
+    },
+    {
+      "dataset": "wine",
+      "run_seed": 212,
+      "split_seed": 21208
+    },
+    {
+      "dataset": "yacht",
+      "run_seed": 212,
+      "split_seed": 21209
+    },
+    {
+      "dataset": "bike",
+      "run_seed": 212,
+      "split_seed": 21210
+    },
+    {
+      "dataset": "autompg",
+      "run_seed": 222,
+      "split_seed": 22201
+    },
+    {
+      "dataset": "concrete",
+      "run_seed": 222,
+      "split_seed": 22202
+    },
+    {
+      "dataset": "energy",
+      "run_seed": 222,
+      "split_seed": 22203
+    },
+    {
+      "dataset": "kin8nm",
+      "run_seed": 222,
+      "split_seed": 22204
+    },
+    {
+      "dataset": "naval",
+      "run_seed": 222,
+      "split_seed": 22205
+    },
+    {
+      "dataset": "power",
+      "run_seed": 222,
+      "split_seed": 22206
+    },
+    {
+      "dataset": "protein",
+      "run_seed": 222,
+      "split_seed": 22207
+    },
+    {
+      "dataset": "wine",
+      "run_seed": 222,
+      "split_seed": 22208
+    },
+    {
+      "dataset": "yacht",
+      "run_seed": 222,
+      "split_seed": 22209
+    },
+    {
+      "dataset": "bike",
+      "run_seed": 222,
+      "split_seed": 22210
+    }
+  ],
+  "withheld_claims": [
+    "universal predictive dominance",
+    "general calibration",
+    "VI-to-NUTS equivalence",
+    "package-default promotion"
+  ]
+}

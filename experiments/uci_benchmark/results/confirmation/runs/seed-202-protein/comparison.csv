@@ -1,0 +1,9 @@
+comparison_role,dataset,family,model,procedure,seed,split_seed,n_test,uncertainty_scope,mean_nll,mean_crps,calibration_error,status,failure
+primary,protein,normal,dune_bayes,R,202,20207,9146,distributional_parameter_bands,3.136253619108538,3.24150298440473,0.06114148261535098,completed,
+primary,protein,normal,deterministic_namlss,R,202,20207,9146,deterministic_distributional,3.6678136521190723,4.889595609383875,0.09771703476929805,completed,
+primary,protein,normal,plain_mlp,R,202,20207,9146,deterministic_distributional,3.013512543586107,2.928283949759282,0.044600918434288206,completed,
+primary,protein,normal,deep_ensemble,R,202,20207,9146,ensemble_distributional,3.0053570379670647,2.913382363247135,0.04302645965449377,completed,
+primary,protein,normal,dune_bayes,C,202,20207,9146,distributional_parameter_bands,3.0206873393545393,2.8368405902341234,0.028165318171878416,completed,
+primary,protein,normal,deterministic_namlss,C,202,20207,9146,deterministic_distributional,3.0135177931482775,2.838657902963554,0.030474524382243608,completed,
+primary,protein,normal,plain_mlp,C,202,20207,9146,deterministic_distributional,2.830379415837529,2.47633355092749,0.024767111305488736,completed,
+primary,protein,normal,deep_ensemble,C,202,20207,9146,ensemble_distributional,2.7946770942746966,2.4321047642721094,0.025029521102121144,completed,

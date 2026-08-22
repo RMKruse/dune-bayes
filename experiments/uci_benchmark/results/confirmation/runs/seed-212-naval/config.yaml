@@ -1,0 +1,93 @@
+experiment: uci_benchmark
+seed: 212
+primary_models:
+- dune_bayes
+- deterministic_namlss
+- plain_mlp
+- deep_ensemble
+datasets:
+- name: naval
+  family: beta
+  response: target
+  split_seed: 21205
+  response_transform: open_unit_interval
+  source:
+    kind: uci
+    id: 316
+data:
+  cache_dir: data/cache
+  split_dir: data/confirmation-splits/seed-212
+  test_fraction: 0.2
+  validation_fraction: 0.2
+architecture:
+  hidden_dims:
+  - 16
+  prior_scale: 1.0
+  activation: tanh
+tuning:
+  seed: 102
+  objective: validation_nll
+  hidden_dims:
+  - - 16
+  - - 32
+  - - 64
+  - - 32
+    - 32
+  learning_rates:
+  - 0.001
+  - 0.003
+  - 0.01
+  smoke_candidate_count: 2
+development:
+  run_seeds:
+  - 102
+  - 112
+  - 122
+  comparator_candidates:
+  - plain_mlp
+  - deep_ensemble
+  comparator_tie_winner: deep_ensemble
+  selected_candidate_failure_limit: 1
+  confirmation_run_seeds:
+  - 202
+  - 212
+  - 222
+  enabled: true
+  dataset: naval
+  selection_seed: 102
+training:
+  epochs: 500
+  learning_rate: 0.01
+  warmup_epochs: 20
+  validation_check_every: 10
+  validation_patience_checks: 5
+  validation_draws: 32
+baselines:
+  mean_only_gaussian:
+    enabled: true
+  bayesnam_style:
+    enabled: true
+    label: BayesNAM-style (our implementation)
+    family: normal_homoscedastic
+    effect: location_only
+  deep_ensemble_members: 5
+  namlss:
+    enabled: false
+    python: ../../.venv-nampy/bin/python
+    runner: nampy_namlss_runner.py
+    paper_code_dir: ../../namlss-paper-code
+    batch_size: 512
+  lanam:
+    enabled: false
+    python: ../../.venv-lanam/bin/python
+    runner: lanam_runner.py
+    batch_size: 512
+  bamlss_reference:
+    enabled: false
+    fixture_dir: fixtures/bamlss
+draws: 500
+predictive_samples: 500
+calibration_bins: 10
+artifacts:
+  root: /Users/entropy/Git/dune-bayes/experiments/uci_benchmark/runs
+  run_name: confirmation-seed-212-naval

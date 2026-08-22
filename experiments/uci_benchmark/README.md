@@ -69,6 +69,24 @@ and that no package default or paper claim is promoted. Full runs are written
 under ignored `runs/`; the reviewed freeze lands at
 `results/development-freeze/`.
 
+## Locked confirmation
+
+Issue #181 consumes the development freeze without rerunning selection or
+changing comparator identities. Run all 30 predeclared split/run pairs and
+publish the mechanically earned panel-bounded claim with:
+
+```bash
+uv run --extra experiments python experiments/uci_benchmark/confirmation.py --run
+```
+
+The command is resumable. Infrastructure failures are recorded before a repair
+rerun, and the generated config keeps the same dataset, split seed, and run seed.
+The report retains every raw score, computes dataset-first NLL/CRPS gap closure,
+size-normalized PIT evidence, and checks the frozen recovery, VI-to-NUTS,
+interpretability, numerical-stability, and KL guardrails. Reviewed output lands
+at `results/confirmation/`; human review may downgrade its mechanical tier but
+may not upgrade it.
+
 Each dataset writes `metrics/<dataset>/nll.csv`, `crps.csv`, and
 `calibration.csv`. NLL is the held-out posterior-predictive negative
 log-likelihood (`logsumexp` over coherent draws), CRPS is the package's fair

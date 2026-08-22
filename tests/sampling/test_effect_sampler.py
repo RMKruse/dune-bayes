@@ -9,9 +9,12 @@ Four reference-test archetypes (CLAUDE.md):
 
 import math
 
+import numpy as np
+import pandas as pd
 import pytest
 import torch
 
+from dune_bayes.data import DataModule
 from dune_bayes.families import NormalFamily
 from dune_bayes.model import BayesianNAMLSS
 from dune_bayes.sampling import T_PREDICT, sample_effects
@@ -85,6 +88,50 @@ def test_all_feature_names_returned(multi_model, data_multi, family):
     assert set(samples.keys()) == {"x1", "x2"}
     for name in ("x1", "x2"):
         assert samples[name].shape == (10, N_OBS, family.param_count)
+
+
+def test_additive_predictor_reconstructs_from_separate_effects(multi_model, data_multi):
+    """Intercept plus public per-feature draws reconstruct the additive predictor."""
+    multi_model.eval()
+    expanded = {name: values.unsqueeze(0) for name, values in data_multi.items()}
+    torch.manual_seed(181)
+    predictor = multi_model.predict_params(expanded)
+
+    # Replay the same coherent global draws through the separately inspectable
+    # effect seam; the only remaining predictor component is the intercept.
+    torch.manual_seed(181)
+    effects = sample_effects(multi_model, data_multi, T=1)
+    reconstructed = sum(effects.values()) + multi_model.intercept(
+        n_samples=1
+    ).unsqueeze(1)
+
+    # atol=1e-5 covers float32 summation-order error across the separate effects.
+    torch.testing.assert_close(reconstructed, predictor, rtol=0.0, atol=1e-5)
+
+
+def test_effect_bands_are_reportable_on_original_covariate_scale(multi_model):
+    """Effect centers and bands pair with an inverse-transformed covariate grid."""
+    x1 = np.linspace(10.0, 20.0, N_OBS, dtype=np.float32)
+    frame = pd.DataFrame(
+        {"x1": x1, "x2": x1[::-1].copy(), "y": np.zeros(N_OBS, dtype=np.float32)}
+    )
+    data = DataModule(
+        frame,
+        response="y",
+        numeric_scaling={"x1": "standard", "x2": "minmax"},
+    )
+    scaled = data.transform(frame)
+    torch.manual_seed(181)
+    effects = sample_effects(
+        multi_model, {name: scaled[name] for name in ("x1", "x2")}, T=20
+    )
+    q05, center, q95 = effects["x1"].quantile(torch.tensor([0.05, 0.5, 0.95]), dim=0)
+    original_grid = data.inverse_transform("x1", scaled["x1"].squeeze(-1))
+
+    assert torch.isfinite(torch.stack((q05, center, q95))).all()
+    assert torch.all(q05 <= center) and torch.all(center <= q95)
+    # atol=1e-5 covers the float32 scale/unscale round trip used by plot axes.
+    np.testing.assert_allclose(original_grid.numpy(), x1, rtol=0.0, atol=1e-5)
 
 
 # ── 3: Default T = 200 ────────────────────────────────────────────────────────
