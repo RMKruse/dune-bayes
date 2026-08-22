@@ -6,6 +6,7 @@ import csv
 import functools
 import http.server
 import json
+import math
 import subprocess
 import sys
 import threading
@@ -89,6 +90,196 @@ def _read_rows(path: Path) -> list[dict[str, str]]:
     """Read one public metric table."""
     with path.open(encoding="utf-8", newline="") as handle:
         return list(csv.DictReader(handle))
+
+
+def test_response_transform_restores_continuous_predictions_and_scores() -> None:
+    """Affine predictions and proper scores return to the response's units."""
+    transform = ResponseTransform.fit(torch.tensor([2.0, 6.0]), family="normal")
+
+    # Training mean=4 and population std=2; the held-out value never enters fit.
+    assert transform.to_model_scale(torch.tensor([10.0])).item() == 3.0
+    standard_log_density = -0.5 * 0.5**2 - 0.5 * math.log(2.0 * math.pi)
+    reference_pit = 0.5 * (1.0 + math.erf(0.5 / math.sqrt(2.0)))
+    standardized = PredictiveResult(
+        samples=torch.tensor([[-1.0], [0.0], [1.0]]),
+        log_density=torch.tensor([standard_log_density], dtype=torch.float64),
+        cdf=torch.tensor([reference_pit], dtype=torch.float64),
+    )
+    original = transform.to_original_prediction(standardized)
+
+    # All values are exactly representable binary floats under this affine map.
+    torch.testing.assert_close(
+        original.samples,
+        torch.tensor([[2.0], [4.0], [6.0]]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    # 1e-12 covers float64 evaluation order against the analytic Normal reference.
+    assert float(-original.log_density[0]) == pytest.approx(
+        -standard_log_density + math.log(2.0), rel=0.0, abs=1e-12
+    )
+    # Fair empirical CRPS: 5/3 - (8 / (3*2)) = 1/3.
+    assert float(crps(original.samples, torch.tensor([5.0]))[0]) == pytest.approx(
+        1.0 / 3.0, rel=0.0, abs=1e-12
+    )
+    # PIT is invariant under a monotone affine transform; float64 error is <1e-12.
+    assert float(original.cdf[0]) == pytest.approx(reference_pit, rel=0.0, abs=1e-12)
+
+    original_reference = PredictiveResult(
+        samples=torch.tensor([[2.0], [4.0], [6.0]]),
+        log_density=torch.tensor(
+            [standard_log_density - math.log(2.0)], dtype=torch.float64
+        ),
+        cdf=torch.tensor([reference_pit], dtype=torch.float64),
+    )
+    model_scale = transform.to_model_prediction(original_reference)
+    # Binary-exact literals independently check the inverse sample affine map.
+    torch.testing.assert_close(
+        model_scale.samples,
+        torch.tensor([[-1.0], [0.0], [1.0]]),
+        rtol=0.0,
+        atol=0.0,
+    )
+    # 1e-12 covers float64 cancellation in the analytic +log(scale) Jacobian.
+    assert float(model_scale.log_density[0]) == pytest.approx(
+        standard_log_density, rel=0.0, abs=1e-12
+    )
+
+    loc, scale = transform.to_original_normal_parameters(
+        torch.tensor([-1.0, 1.0]), torch.tensor([0.5, 1.5])
+    )
+    # Binary-exact values isolate the location/stddev affine rule from MC noise.
+    torch.testing.assert_close(loc, torch.tensor([2.0, 6.0]), rtol=0.0, atol=0.0)
+    torch.testing.assert_close(scale, torch.tensor([1.0, 3.0]), rtol=0.0, atol=0.0)
+    torch.testing.assert_close(
+        transform.to_original_variance(torch.tensor([1.0, 4.0])),
+        torch.tensor([4.0, 16.0]),
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
+def test_common_adapter_boundary_reuses_transform_for_held_out_rows() -> None:
+    """Every routed adapter receives model units and returns original units."""
+
+    class RecordingAdapter:
+        name = "recording"
+        uncertainty_scope = "test"
+
+        def __init__(self) -> None:
+            self.target: torch.Tensor | None = None
+
+        def fit(self, train_data: object, *, smoke: bool) -> None:
+            del train_data, smoke
+
+        def predict(
+            self,
+            features: object,
+            target: torch.Tensor,
+            *,
+            draws: int,
+            predictive_samples: int,
+            seed: int,
+        ) -> PredictiveResult:
+            del features, draws, predictive_samples, seed
+            self.target = target
+            return PredictiveResult(
+                samples=target.unsqueeze(0),
+                log_density=torch.zeros_like(target, dtype=torch.float64),
+                cdf=torch.full_like(target, 0.5, dtype=torch.float64),
+            )
+
+    adapter = RecordingAdapter()
+    transform = ResponseTransform.fit(torch.tensor([2.0, 6.0]), family="normal")
+    prediction = predict_on_original_scale(
+        adapter,
+        transform,
+        {},
+        torch.tensor([10.0]),
+        draws=3,
+        predictive_samples=4,
+        seed=5,
+    )
+
+    assert adapter.target is not None
+    # Mean=4/std=2 gives held-out z=3 and maps the returned sample back to 10.
+    torch.testing.assert_close(adapter.target, torch.tensor([3.0]), rtol=0.0, atol=0.0)
+    torch.testing.assert_close(
+        prediction.samples, torch.tensor([[10.0]]), rtol=0.0, atol=0.0
+    )
+    # The model-scale zero log-density acquires exactly the -log(2) Jacobian.
+    assert float(prediction.log_density[0]) == pytest.approx(
+        -math.log(2.0), rel=0.0, abs=1e-12
+    )
+
+
+def test_smoke_persists_train_only_response_standardization(tmp_path: Path) -> None:
+    """The public smoke path records the transform fitted on training rows."""
+    completed = _run_smoke(_smoke_config(tmp_path))
+    assert completed.returncode == 0, completed.stderr
+
+    cached = np.genfromtxt(
+        tmp_path / "cache" / "autompg-smoke.csv",
+        delimiter=",",
+        names=True,
+    )
+    with np.load(tmp_path / "splits" / "autompg-smoke.npz") as split:
+        train_response = cached["mpg"][split["train_indices"]].astype(np.float32)
+    metadata = json.loads(
+        (
+            tmp_path
+            / "runs"
+            / "uci_benchmark"
+            / "seed-102"
+            / "metrics"
+            / "autompg"
+            / "response_transform.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    assert metadata["method"] == "standard"
+    assert metadata["fit_partition"] == "train"
+    assert metadata["n_fit"] == len(train_response)
+    # EPS is wider than one float32 reduction ULP for this smoke fixture.
+    assert metadata["loc"] == pytest.approx(
+        float(train_response.mean()), rel=0.0, abs=EPS
+    )
+    assert metadata["scale"] == pytest.approx(
+        float(train_response.std()), rel=0.0, abs=EPS
+    )
+
+
+@pytest.mark.parametrize("family", ["beta", "negative_binomial"])
+def test_native_support_responses_remain_untransformed(family: str) -> None:
+    """Bounded and count likelihoods keep their native response support."""
+    target = torch.tensor([0.25, 0.75])
+    transform = ResponseTransform.fit(target, family=family)
+
+    assert transform.method == "identity"
+    # Identity has no arithmetic, so bit equality is the contract.
+    torch.testing.assert_close(
+        transform.to_model_scale(target), target, rtol=0.0, atol=0.0
+    )
+
+
+def test_constant_response_transform_is_finite_and_round_trips() -> None:
+    """The EPS scale floor keeps a degenerate training response usable."""
+    transform = ResponseTransform.fit(torch.full((4,), 7.0), family="normal")
+    original = torch.tensor([7.0, 7.000001])
+    model_scale = transform.to_model_scale(original)
+    restored = transform.to_original_prediction(
+        PredictiveResult(
+            samples=model_scale.unsqueeze(0),
+            log_density=torch.zeros(2, dtype=torch.float64),
+            cdf=torch.full((2,), 0.5, dtype=torch.float64),
+        )
+    )
+
+    assert transform.scale == EPS
+    assert bool(torch.isfinite(model_scale).all())
+    assert bool(torch.isfinite(restored.log_density).all())
+    # EPS covers one float32 subtract/divide/multiply/add round-trip near 7.
+    torch.testing.assert_close(restored.samples[0], original, rtol=0.0, atol=EPS)
 
 
 def test_smoke_writes_nll_crps_and_pit_calibration_tables(tmp_path: Path) -> None:
@@ -386,42 +577,14 @@ np.savez(
 def test_configured_bamlss_fixture_is_scored_on_shared_split(
     tmp_path: Path,
 ) -> None:
-    """Maintainer-produced BAMLSS fixtures enter through the shared scorer."""
-    fixture_dir = tmp_path / "bamlss-fixtures"
-    dataset_dir = fixture_dir / "autompg"
-    dataset_dir.mkdir(parents=True)
-    n_test = 4
-    rows = []
-    for observation in range(n_test):
-        center = float(observation)
-        row = {
-            "dataset": "autompg",
-            "observation": observation,
-            "log_density": -0.5,
-            "cdf": 0.1 + 0.2 * observation,
-            "q05": center - 0.2,
-            "q50": center,
-            "q95": center + 0.2,
-        }
-        for draw in range(32):
-            row[f"sample_{draw + 1:04d}"] = center + draw / 1000.0
-        rows.append(row)
-    with (dataset_dir / "predictions.csv").open(
-        "w", encoding="utf-8", newline=""
-    ) as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-    (dataset_dir / "provenance.json").write_text(
-        json.dumps(
-            {
-                "script_version": "issue-0107-test",
-                "seed": 10701,
-                "date": "2026-06-23",
-            }
-        ),
-        encoding="utf-8",
+    """The committed BAMLSS fixture enters through the shared scorer."""
+    fixture_dir = Path("experiments/uci_benchmark/fixtures/bamlss").resolve()
+    provenance = json.loads(
+        (fixture_dir / "autompg" / "provenance.json").read_text(encoding="utf-8")
     )
+    assert provenance["script_version"] == "issue-0175-response-standardization-v1"
+    assert provenance["response_transform"]["method"] == "standard"
+    assert provenance["response_transform"]["fit_partition"] == "train"
 
     config_path = _smoke_config(tmp_path)
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -440,7 +603,11 @@ def test_configured_bamlss_fixture_is_scored_on_shared_split(
     }
     bamlss = rows_by_model["bamlss_reference"]
     assert bamlss["dataset"] == rows_by_model["dune_bayes"]["dataset"] == "autompg"
-    assert bamlss["n_test"] == rows_by_model["dune_bayes"]["n_test"] == str(n_test)
+    assert (
+        bamlss["n_test"]
+        == rows_by_model["dune_bayes"]["n_test"]
+        == str(provenance["n_test"])
+    )
     assert bamlss["uncertainty_scope"] == "distributional_bamlss_fixture"
     assert np.isfinite(float(bamlss["mean_nll"]))
     assert np.isfinite(float(bamlss["mean_crps"]))
@@ -457,13 +624,14 @@ def test_bamlss_reference_route_is_documented_with_seeded_r_script() -> None:
         Path("experiments/uci_benchmark/config.yaml").read_text(encoding="utf-8")
     )
 
-    assert "Script version: issue-0107-bamlss-reference-v1" in script
+    assert "Script version: issue-0175-response-standardization-v1" in script
     assert "R version pinned for fixture generation:" in script
     assert "bamlss package version pinned for fixture generation:" in script
     assert "set.seed" in script
     assert "provenance.json" in script
     assert "predictions.csv" in script
     assert "sample_0001" in script
+    assert "response_transform" in script
     assert 'reticulate::import("numpy"' in script
     assert config["baselines"]["bamlss_reference"]["enabled"] is False
     assert config["baselines"]["bamlss_reference"]["fixture_dir"] == "fixtures/bamlss"
@@ -662,6 +830,10 @@ def test_count_dataset_runs_with_negative_binomial(tmp_path: Path) -> None:
     row = _read_rows(metric_path)[0]
     assert row["family"] == "negative_binomial"
     assert np.isfinite(float(row["mean_nll"]))
+    metadata = json.loads(
+        (metric_path.parent / "response_transform.json").read_text(encoding="utf-8")
+    )
+    assert metadata["method"] == "identity"
 
 
 def test_negative_binomial_candidate_intercepts_match_training_moments() -> None:
@@ -762,6 +934,10 @@ def test_bounded_dataset_runs_with_beta(tmp_path: Path) -> None:
     row = _read_rows(metric_path)[0]
     assert row["family"] == "beta"
     assert np.isfinite(float(row["mean_nll"]))
+    metadata = json.loads(
+        (metric_path.parent / "response_transform.json").read_text(encoding="utf-8")
+    )
+    assert metadata["method"] == "identity"
 
 
 def test_full_run_downloads_once_then_uses_the_cache_offline(tmp_path: Path) -> None:
