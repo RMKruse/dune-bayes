@@ -254,7 +254,7 @@ def _build_dune_bayes_model(
         n_obs=train_data.n_obs,
     )
     if isinstance(family, NegativeBinomialFamily):
-        target = train_data.target.to(torch.float64)
+        target = train_data.target
         mean = target.mean()
         variance = target.var(correction=0)
         dispersion = (

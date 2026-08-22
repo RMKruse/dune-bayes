@@ -720,6 +720,8 @@ def test_negative_binomial_candidate_uses_finite_poisson_limit_fallback(
 
     # A finite raw value can only approach the family floor from above. Using
     # EPS as the pre-floor softplus value therefore gives the 2*EPS fallback.
+    # rtol covers float32 inverse-link rounding at that scale; atol=1e-12 is
+    # small enough that losing the EPS-scale value cannot be masked.
     torch.testing.assert_close(linked, torch.tensor(expected), rtol=1e-6, atol=1e-12)
     assert torch.isfinite(log_prob).all()
 
